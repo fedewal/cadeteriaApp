@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- El azul de la cabecera de la pantalla del cadete (variable "azul" del
+         mockup aprobado). -->
+    <color name="ic_launcher_background">#242F62</color>
+</resources>

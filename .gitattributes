@@ -1,0 +1,5 @@
+# `gradlew` es un script de shell: con CRLF no corre en Linux ni en macOS, y el
+# error que da no menciona los saltos de linea. Esta maquina es Windows con
+# conversion automatica, asi que sin esto el repo se publica con CRLF adentro.
+gradlew text eol=lf
+*.jar binary

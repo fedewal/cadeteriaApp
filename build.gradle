@@ -1,0 +1,6 @@
+// AGP 8.9.1 y nada mas: es la version que ya esta en la cache de Gradle de
+// esta maquina, asi que el build no depende de bajar el plugin. Mismo pin que
+// vendedoresApp, por el mismo motivo.
+plugins {
+    id 'com.android.application' version '8.9.1' apply false
+}

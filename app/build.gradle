@@ -1,0 +1,70 @@
+plugins {
+    id 'com.android.application'
+}
+
+// La firma NO va en el repo. `keystore.properties` y el .jks viven fuera
+// (OneDrive\Documents\claves-cadeteriaApp) y están en .gitignore: si el
+// keystore se pierde, la app no se puede volver a actualizar nunca y hay que
+// desinstalarla de cada teléfono a mano.
+//
+// Es un keystore PROPIO y no el de vendedoresApp: son dos applicationId
+// distintos, así que Android los trata como dos apps sin relación.
+def propsFirma = new Properties()
+def archivoFirma = rootProject.file("keystore.properties")
+if (archivoFirma.exists()) {
+    propsFirma.load(new FileInputStream(archivoFirma))
+}
+
+android {
+    namespace 'today.scrappy.cadeteria'
+    compileSdk 36
+
+    defaultConfig {
+        applicationId "today.scrappy.cadeteria"
+        // Igual que vendedoresApp: los equipos son Samsung A16 (Android 14) y
+        // 26 deja lugar a un teléfono más viejo sin costarnos nada.
+        minSdk 26
+        targetSdk 34
+        versionCode 1
+        versionName "0.1.0"
+        buildConfigField "String", "BASE_URL", '"https://back.scrappy.today"'
+    }
+
+    buildFeatures {
+        buildConfig true
+    }
+
+    signingConfigs {
+        release {
+            if (propsFirma.getProperty('storeFile')) {
+                storeFile file(propsFirma.getProperty('storeFile'))
+                storePassword propsFirma.getProperty('storePassword')
+                keyAlias propsFirma.getProperty('keyAlias')
+                keyPassword propsFirma.getProperty('keyPassword')
+            }
+        }
+    }
+
+    buildTypes {
+        release {
+            // Sin ofuscar: la app es un caparazón. R8 sólo agregaría una forma
+            // de que algo falle en el teléfono y no acá.
+            minifyEnabled false
+            if (propsFirma.getProperty('storeFile')) {
+                signingConfig signingConfigs.release
+            }
+        }
+    }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+}
+
+dependencies {
+    // NINGUNA, igual que vendedoresApp y por el mismo motivo: `appcompat`
+    // arrastraba la stdlib de Kotlin en dos versiones incompatibles
+    // (`Duplicate class kotlin.*`). Con `minSdk 26` todo lo que usa la app
+    // existe en la plataforma.
+}

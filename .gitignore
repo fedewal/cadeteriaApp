@@ -1,0 +1,16 @@
+# La firma nunca va al repo: con el keystore cualquiera puede publicar una
+# actualizacion que los telefonos acepten como nuestra.
+keystore.properties
+*.jks
+*.keystore
+
+# Build
+build/
+app/build/
+.gradle/
+local.properties
+
+# IDE
+.idea/
+*.iml
+captures/

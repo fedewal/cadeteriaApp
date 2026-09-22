@@ -1,0 +1,18 @@
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <!-- Una lista con tildes: la pantalla es la lista de visitas del dia.
+         (vendedoresApp usa un pin, que es lo que hace esa app; esta no
+         rastrea nada todavia, asi que un pin prometeria algo que no hay.) -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M36,36h30v5H36zM36,50h30v5H36zM36,64h22v5H36z" />
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M26,35.5l3,-3l3.5,3.5l6.5,-6.5l0,0l-3,-3l-3.5,3.5l-3.5,-3.5z" />
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M26,49.5l3,-3l3.5,3.5l6.5,-6.5l0,0l-3,-3l-3.5,3.5l-3.5,-3.5z" />
+</vector>
