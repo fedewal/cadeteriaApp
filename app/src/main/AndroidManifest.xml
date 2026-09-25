@@ -11,6 +11,14 @@
     <uses-permission android:name="android.permission.CAMERA" />
     <uses-feature android:name="android.hardware.camera" android:required="false" />
 
+    <!-- INSTALAR: la app baja el APK y abre el instalador ella misma. Antes abria
+         la descarga en Chrome, y Chrome DESCARTA los .apk (su analisis de
+         seguridad los bloquea): la barra se llenaba al instante y el archivo
+         nunca aparecia en Descargas. Reportado por Federico el 2026-09-25.
+         Con la actualizacion obligatoria esto pasa de molesto a grave: el cartel
+         no se puede cerrar y el cadete quedaria encerrado sin forma de salir. -->
+    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
+
     <!-- NADA de ubicacion, notificaciones, servicio en primer plano ni
          BOOT_COMPLETED, a diferencia de vendedoresApp. Lo que la app hace hoy
          es mostrar las visitas del dia y leer la etiqueta del equipo: pedir
