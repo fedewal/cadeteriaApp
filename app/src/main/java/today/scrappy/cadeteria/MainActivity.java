@@ -1,10 +1,14 @@
 package today.scrappy.cadeteria;
 
+import android.Manifest;
 import android.app.Activity;
 import android.content.Intent;
+import android.content.pm.PackageManager;
 import android.net.Uri;
 import android.os.Bundle;
 import android.webkit.CookieManager;
+import android.webkit.PermissionRequest;
+import android.webkit.WebChromeClient;
 import android.webkit.WebResourceRequest;
 import android.webkit.WebSettings;
 import android.webkit.WebView;
@@ -18,15 +22,30 @@ import android.webkit.WebViewClient;
  * aporta hoy es el ícono en el launcher, arrancar sin la barra del navegador
  * y avisar cuando hay una versión nueva.
  *
- * <p>A diferencia de vendedoresApp, acá NO hay servicio de ubicación ni
- * permisos que pedir: la pantalla del cadete hoy es de sólo lectura. Cuando
- * exista el rastreo propio del recorrido, esa tarea agrega lo que necesite.
+ * <p>A diferencia de vendedoresApp, acá NO hay servicio de ubicación. El único
+ * permiso sensible es la CÁMARA, y existe por una sola razón: escanear la
+ * etiqueta del equipo al cerrar un evento. Se pide cuando la pantalla la usa, no
+ * al instalar. Cuando exista el rastreo propio del recorrido, esa tarea agrega lo
+ * que necesite.
  */
 public class MainActivity extends Activity {
 
     private static final String INICIO = BuildConfig.BASE_URL + "/cadeteria/";
 
+    /** Código propio para la respuesta de {@link #onRequestPermissionsResult}. */
+    private static final int PIDO_CAMARA = 1;
+
     private WebView web;
+
+    /**
+     * El pedido de la página que quedó esperando a que Android conteste.
+     *
+     * <p>Son DOS permisos distintos y hay que atravesar los dos: el del sistema
+     * (Android le pregunta al usuario por la cámara) y el del WebView (la página
+     * pide `getUserMedia`). Si se contesta el del WebView sin tener el del
+     * sistema, la cámara falla igual y sin explicación.
+     */
+    private PermissionRequest camaraPendiente;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -48,6 +67,36 @@ public class MainActivity extends Activity {
         // cerrar la app: si no, el cadete loguea cada vez que la abre.
         CookieManager.getInstance().setAcceptCookie(true);
         CookieManager.getInstance().setAcceptThirdPartyCookies(web, false);
+
+        // La cámara del escáner de series. `WebChromeClient` es el único lugar
+        // donde el WebView pregunta esto: sin esta clase puesta, un
+        // `getUserMedia` se rechaza en silencio y la página no puede distinguir
+        // "el usuario dijo que no" de "esta app nunca lo va a permitir".
+        web.setWebChromeClient(new WebChromeClient() {
+            @Override
+            public void onPermissionRequest(final PermissionRequest pedido) {
+                if (!quiereLaCamara(pedido)) {
+                    // Micrófono y todo lo demás se rechaza. La app no tiene por
+                    // qué poder escuchar, y conceder de más es exactamente lo
+                    // que hace que un permiso deje de significar algo.
+                    pedido.deny();
+                    return;
+                }
+                if (checkSelfPermission(Manifest.permission.CAMERA)
+                        == PackageManager.PERMISSION_GRANTED) {
+                    concederCamara(pedido);
+                    return;
+                }
+                camaraPendiente = pedido;
+                requestPermissions(new String[]{Manifest.permission.CAMERA},
+                        PIDO_CAMARA);
+            }
+
+            @Override
+            public void onPermissionRequestCanceled(PermissionRequest pedido) {
+                camaraPendiente = null;
+            }
+        });
 
         web.setWebViewClient(new WebViewClient() {
             @Override
@@ -105,6 +154,54 @@ public class MainActivity extends Activity {
         String actual = web.getUrl();
         if (actual == null || !actual.startsWith(INICIO)) {
             web.loadUrl(INICIO);
+        }
+    }
+
+    /** Si el pedido de la página incluye vídeo. El audio no se concede nunca. */
+    private static boolean quiereLaCamara(PermissionRequest pedido) {
+        String[] recursos = pedido.getResources();
+        if (recursos == null) {
+            return false;
+        }
+        for (String recurso : recursos) {
+            if (PermissionRequest.RESOURCE_VIDEO_CAPTURE.equals(recurso)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /**
+     * Concede SÓLO el vídeo, aunque la página haya pedido más.
+     *
+     * <p>`grant()` con la lista que vino del pedido concedería también el
+     * micrófono si la página lo hubiera incluido.
+     */
+    private static void concederCamara(PermissionRequest pedido) {
+        pedido.grant(new String[]{PermissionRequest.RESOURCE_VIDEO_CAPTURE});
+    }
+
+    @Override
+    public void onRequestPermissionsResult(int codigo, String[] permisos,
+                                           int[] resultados) {
+        super.onRequestPermissionsResult(codigo, permisos, resultados);
+        if (codigo != PIDO_CAMARA) {
+            return;
+        }
+        PermissionRequest pedido = camaraPendiente;
+        camaraPendiente = null;
+        if (pedido == null) {
+            return;
+        }
+        boolean concedido = resultados.length > 0
+                && resultados[0] == PackageManager.PERMISSION_GRANTED;
+        if (concedido) {
+            concederCamara(pedido);
+        } else {
+            // Se contesta que NO en vez de dejarlo colgado: la página tiene un
+            // camino para cuando no hay cámara (tipear la serie), y sólo lo toma
+            // si `getUserMedia` falla.
+            pedido.deny();
         }
     }
 

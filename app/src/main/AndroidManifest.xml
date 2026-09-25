@@ -4,11 +4,19 @@
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
 
+    <!-- CAMARA: para escanear la etiqueta del equipo al cerrar un evento. Es el
+         unico permiso sensible que la app pide, y se pide cuando se usa, no al
+         instalar. `required="false"` a proposito: un telefono sin camara sigue
+         pudiendo usar el resto de la app (la pantalla cae al tipeo). -->
+    <uses-permission android:name="android.permission.CAMERA" />
+    <uses-feature android:name="android.hardware.camera" android:required="false" />
+
     <!-- NADA de ubicacion, notificaciones, servicio en primer plano ni
-         BOOT_COMPLETED, a diferencia de vendedoresApp. Esta app hoy solo
-         MUESTRA las visitas del dia: pedir permisos que no se usan asusta al
-         que instala y no compra nada. Cuando exista el rastreo propio del
-         recorrido, esa tarea agrega los que necesite. -->
+         BOOT_COMPLETED, a diferencia de vendedoresApp. Lo que la app hace hoy
+         es mostrar las visitas del dia y leer la etiqueta del equipo: pedir
+         permisos que no se usan asusta al que instala y no compra nada. Cuando
+         exista el rastreo propio del recorrido, esa tarea agrega los que
+         necesite. -->
 
     <application
         android:allowBackup="false"
