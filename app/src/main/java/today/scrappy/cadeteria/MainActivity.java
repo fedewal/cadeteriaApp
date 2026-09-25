@@ -63,6 +63,14 @@ public class MainActivity extends Activity {
         ajustes.setLoadWithOverviewMode(false);
         ajustes.setSupportZoom(false);
 
+        // La app le dice su versión al servidor en cada request. Sirve para dos
+        // cosas: que la pantalla pueda MOSTRAR qué versión está instalada (desde
+        // adentro de un WebView no hay otra forma de saberlo), y para que algún
+        // día el servidor pueda rechazar una versión vieja sin depender de que
+        // el teléfono le pregunte a GitHub.
+        ajustes.setUserAgentString(
+                ajustes.getUserAgentString() + " CadeteriaApp/" + BuildConfig.VERSION_NAME);
+
         // La sesión de Django vive en una cookie y tiene que sobrevivir a
         // cerrar la app: si no, el cadete loguea cada vez que la abre.
         CookieManager.getInstance().setAcceptCookie(true);
@@ -143,6 +151,16 @@ public class MainActivity extends Activity {
         // Al abrir, y en segundo plano: si hay una versión nueva publicada el
         // cadete se entera solo, sin que nadie tenga que avisarle.
         Actualizaciones.chequear(this);
+    }
+
+    @Override
+    protected void onResume() {
+        super.onResume();
+        // Volver al frente también chequea: una app que quedó abierta de fondo
+        // no se enteraría nunca de que hay versión nueva, y la actualización es
+        // obligatoria. `Actualizaciones` trae su propio freno para no gastar la
+        // cuota de la API de GitHub.
+        Actualizaciones.chequearSiCorresponde(this);
     }
 
     @Override
