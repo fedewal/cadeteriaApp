@@ -13,6 +13,9 @@ import android.os.IBinder;
 import android.util.Log;
 import android.webkit.CookieManager;
 
+import org.json.JSONException;
+import org.json.JSONObject;
+
 import java.io.BufferedReader;
 import java.io.InputStreamReader;
 import java.net.HttpURLConnection;
@@ -138,6 +141,7 @@ public class AvisosService extends Service {
                 }
                 BufferedReader lector = new BufferedReader(new InputStreamReader(
                         con.getInputStream(), StandardCharsets.UTF_8));
+                Log.i(TAG, "escuchando ntfy desde " + desde);
                 String linea;
                 while (vivo && (linea = lector.readLine()) != null) {
                     if (!linea.trim().isEmpty()) {
@@ -164,6 +168,7 @@ public class AvisosService extends Service {
             String base = BuildConfig.BASE_URL;
             String cookies = CookieManager.getInstance().getCookie(base);
             if (cookies == null || !cookies.contains("sessionid")) {
+                Log.i(TAG, "sin sesion todavia: no se pide el topic");
                 return null;  // todavía no entró, o la sesión venció
             }
             URL url = new URL(base + "/cadeteria/mi-topic/");
@@ -173,11 +178,17 @@ public class AvisosService extends Service {
             con.setInstanceFollowRedirects(false);
             con.setRequestProperty("Cookie", cookies);
             if (con.getResponseCode() != 200) {
+                Log.i(TAG, "mi-topic respondio " + con.getResponseCode());
                 return null;
             }
             String cuerpo = leerTodo(con);
             String topic = valorJson(cuerpo, "topic");
-            return (topic == null || topic.isEmpty()) ? null : topic;
+            if (topic == null || topic.isEmpty()) {
+                Log.i(TAG, "este cadete no tiene topic cargado");
+                return null;
+            }
+            Log.i(TAG, "topic obtenido");
+            return topic;
         } catch (Exception e) {
             Log.w(TAG, "no se pudo preguntar el topic", e);
             return null;
@@ -200,6 +211,7 @@ public class AvisosService extends Service {
             return;  // re-entrega del mismo mensaje
         }
         prefs().edit().putString(ULTIMO, id).apply();
+        Log.i(TAG, "aviso recibido " + id);
 
         String titulo = valorJson(linea, "title");
         String cuerpo = valorJson(linea, "message");
@@ -242,48 +254,22 @@ public class AvisosService extends Service {
     // ---------------------------------------------------------------- utilidades
 
     /**
-     * El valor de una clave de un JSON plano, sin parser.
+     * El valor de una clave de string de un JSON, o {@code null}.
      *
-     * <p>No hay {@code org.json} problema acá —lo hay en la plataforma— pero los
-     * cuerpos son de una sola capa y esto no justifica el try/catch de
-     * {@code JSONObject} en cada llamada. Sólo maneja strings, que es lo único
-     * que se lee del stream de ntfy.
+     * <p>{@code org.json} de la plataforma y NO un parser a mano: la primera
+     * versión buscaba el texto {@code "clave":"} y andaba con el JSON compacto de
+     * ntfy, pero el {@code JsonResponse} de Django escribe {@code "clave": "valor"}
+     * con un espacio, así que el topic nunca aparecía y el servicio se quedaba
+     * esperando en silencio. Pasó en la primera prueba en el teléfono
+     * (2026-09-25).
      */
     private static String valorJson(String json, String clave) {
-        String marca = "\"" + clave + "\":\"";
-        int i = json.indexOf(marca);
-        if (i < 0) {
+        try {
+            JSONObject o = new JSONObject(json);
+            return o.isNull(clave) ? null : o.optString(clave, null);
+        } catch (JSONException e) {
             return null;
         }
-        i += marca.length();
-        StringBuilder salida = new StringBuilder();
-        while (i < json.length()) {
-            char c = json.charAt(i);
-            if (c == '\\' && i + 1 < json.length()) {
-                char sig = json.charAt(i + 1);
-                if (sig == 'n') {
-                    salida.append('\n');
-                } else if (sig == 'u' && i + 5 < json.length()) {
-                    try {
-                        salida.append((char) Integer.parseInt(
-                                json.substring(i + 2, i + 6), 16));
-                    } catch (NumberFormatException e) {
-                        // Escape roto: mejor perder un carácter que el aviso.
-                    }
-                    i += 4;
-                } else {
-                    salida.append(sig);
-                }
-                i += 2;
-                continue;
-            }
-            if (c == '"') {
-                break;
-            }
-            salida.append(c);
-            i++;
-        }
-        return salida.toString();
     }
 
     /** La primera URL https del texto, o {@code null}. */
