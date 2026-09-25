@@ -34,6 +34,9 @@ public class MainActivity extends Activity {
 
     private static final String INICIO = BuildConfig.BASE_URL + "/cadeteria/";
 
+    /** `--azul` de las plantillas de /cadeteria/. Si cambia allá, cambia acá. */
+    private static final int AZUL = 0xFF242F62;
+
     /** Código propio para la respuesta de {@link #onRequestPermissionsResult}. */
     private static final int PIDO_CAMARA = 1;
     private static final int PIDO_AVISOS = 2;
@@ -70,6 +73,13 @@ public class MainActivity extends Activity {
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
+
+        // La barra de estado en el azul de la cabecera (`--azul` de las
+        // plantillas). Sin esto queda en el gris del tema de Android: una banda
+        // que no es de la app arriba de todo. El `theme-color` de la página NO
+        // alcanza — el WebView lo ignora para la barra del sistema. Los iconos
+        // quedan blancos solos (el tema no pide barra clara).
+        getWindow().setStatusBarColor(AZUL);
 
         web = new WebView(this);
         setContentView(web);
