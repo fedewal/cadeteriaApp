@@ -19,12 +19,21 @@
          no se puede cerrar y el cadete quedaria encerrado sin forma de salir. -->
     <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
 
-    <!-- NADA de ubicacion, notificaciones, servicio en primer plano ni
-         BOOT_COMPLETED, a diferencia de vendedoresApp. Lo que la app hace hoy
-         es mostrar las visitas del dia y leer la etiqueta del equipo: pedir
-         permisos que no se usan asusta al que instala y no compra nada. Cuando
-         exista el rastreo propio del recorrido, esa tarea agrega los que
-         necesite. -->
+    <!-- AVISOS: el cadete pide algo desde el campo y la oficina le contesta por
+         chat. El aviso tiene que llegar con el telefono en el bolsillo, asi que
+         hace falta un servicio en PRIMER PLANO (desde Android 8 uno comun se
+         muere a los minutos) con su notificacion permanente, que va en un canal
+         de importancia MINIMA para quedar plegada y muda.
+         Esta adentro de esta app a proposito, en vez de pedirle al cadete que
+         instale tambien la app de ntfy: dos apps para configurar en cada
+         telefono, y una suscripcion que cualquiera puede borrar o silenciar sin
+         que nadie se entere. Ver AvisosService.
+         SIGUE sin haber NADA de ubicacion: eso espera al rastreo propio del
+         recorrido, que hoy lo cubre SimpliRoute. -->
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
+    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
 
     <application
         android:allowBackup="false"
@@ -44,5 +53,25 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
+
+        <!-- `dataSync` y no `remoteMessaging` porque `targetSdk` es 34. OJO al
+             subirlo a 35+: ahi Android 15 le pone un tope de 6 h por dia a
+             `dataSync`, y un cadete trabaja mas que eso; el tipo correcto
+             pasa a ser `remoteMessaging`, que es justo este caso y no tiene
+             tope. Si se sube el target sin cambiar esto, los avisos se cortan
+             a media tarde y no falla nada visible. -->
+        <service
+            android:name=".AvisosService"
+            android:exported="false"
+            android:foregroundServiceType="dataSync" />
+
+        <receiver
+            android:name=".ArranqueReceiver"
+            android:exported="true"
+            android:enabled="true">
+            <intent-filter>
+                <action android:name="android.intent.action.BOOT_COMPLETED" />
+            </intent-filter>
+        </receiver>
     </application>
 </manifest>

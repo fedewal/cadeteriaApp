@@ -5,6 +5,7 @@ import android.app.Activity;
 import android.content.Intent;
 import android.content.pm.PackageManager;
 import android.net.Uri;
+import android.os.Build;
 import android.os.Bundle;
 import android.webkit.CookieManager;
 import android.webkit.PermissionRequest;
@@ -34,6 +35,14 @@ public class MainActivity extends Activity {
 
     /** Código propio para la respuesta de {@link #onRequestPermissionsResult}. */
     private static final int PIDO_CAMARA = 1;
+    private static final int PIDO_AVISOS = 2;
+
+    /**
+     * Con qué URL abrir, en vez del día. La pone la notificación de una
+     * respuesta de administración: el cadete la toca porque quiere ver ESE
+     * pedido, y caer en la pantalla del día lo obligaría a buscarlo.
+     */
+    public static final String EXTRA_URL = "url";
 
     private WebView web;
 
@@ -142,11 +151,19 @@ public class MainActivity extends Activity {
             }
         });
 
-        if (savedInstanceState == null) {
+        String destino = urlDelIntent(getIntent());
+        if (destino != null) {
+            web.loadUrl(destino);
+        } else if (savedInstanceState == null) {
             web.loadUrl(INICIO);
         } else {
             web.restoreState(savedInstanceState);
         }
+
+        // Los avisos de administración. El permiso se pide acá y no al instalar:
+        // Android 13+ lo exige en tiempo de ejecución, y si se niega la app
+        // sigue funcionando entera — el cadete se entera entrando a sus pedidos.
+        pedirAvisos();
 
         // Al abrir, y en segundo plano: si hay una versión nueva publicada el
         // cadete se entera solo, sin que nadie tenga que avisarle.
@@ -161,6 +178,10 @@ public class MainActivity extends Activity {
         // obligatoria. `Actualizaciones` trae su propio freno para no gastar la
         // cuota de la API de GitHub.
         Actualizaciones.chequearSiCorresponde(this);
+        // Y se vuelve a intentar arrancar la escucha de avisos: Android pudo
+        // matar el servicio por memoria, o negarse a arrancarlo la primera vez
+        // (la app todavía no estaba visible). Arrancarlo dos veces no hace nada.
+        AvisosService.arrancar(this);
     }
 
     @Override
@@ -169,6 +190,12 @@ public class MainActivity extends Activity {
         // Tocar el ícono con la app ya abierta tiene que llevar al día. Con
         // `launchMode="singleTask"` Android reanuda esta actividad sin pasar
         // por `onCreate`, así que si no se hace acá no se hace nunca.
+        String destino = urlDelIntent(intent);
+        if (destino != null) {
+            // Vino de una notificación: va al pedido, no al día.
+            web.loadUrl(destino);
+            return;
+        }
         String actual = web.getUrl();
         if (actual == null || !actual.startsWith(INICIO)) {
             web.loadUrl(INICIO);
@@ -203,6 +230,13 @@ public class MainActivity extends Activity {
     public void onRequestPermissionsResult(int codigo, String[] permisos,
                                            int[] resultados) {
         super.onRequestPermissionsResult(codigo, permisos, resultados);
+        if (codigo == PIDO_AVISOS) {
+            // Concedido o no, la escucha arranca: sin permiso no va a poder
+            // mostrar la notificación, pero el permiso se puede dar después
+            // desde los ajustes y entonces ya está escuchando.
+            AvisosService.arrancar(this);
+            return;
+        }
         if (codigo != PIDO_CAMARA) {
             return;
         }
@@ -221,6 +255,38 @@ public class MainActivity extends Activity {
             // si `getUserMedia` falla.
             pedido.deny();
         }
+    }
+
+    /**
+     * La URL que trae el intent de una notificación, si es del sitio.
+     *
+     * <p>Se valida el prefijo a propósito: un intent puede venir de cualquier
+     * app del teléfono, y cargar una URL ajena adentro de un WebView con la
+     * sesión del cadete puesta es exactamente cómo se roba una sesión.
+     */
+    private static String urlDelIntent(Intent intent) {
+        if (intent == null) {
+            return null;
+        }
+        String url = intent.getStringExtra(EXTRA_URL);
+        if (url == null || !url.startsWith(BuildConfig.BASE_URL + "/cadeteria/")) {
+            return null;
+        }
+        return url;
+    }
+
+    private void pedirAvisos() {
+        if (Build.VERSION.SDK_INT >= 33
+                && checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS)
+                    != PackageManager.PERMISSION_GRANTED) {
+            requestPermissions(new String[]{Manifest.permission.POST_NOTIFICATIONS},
+                               PIDO_AVISOS);
+            // El servicio arranca igual cuando conteste (o en el próximo
+            // `onResume`): escucha aunque no pueda mostrar la notificación del
+            // aviso, y así el cartel de estado no depende de la respuesta.
+            return;
+        }
+        AvisosService.arrancar(this);
     }
 
     private void abrirAfuera(Uri destino) {
