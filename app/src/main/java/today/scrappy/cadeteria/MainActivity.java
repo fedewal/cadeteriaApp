@@ -2,6 +2,7 @@ package today.scrappy.cadeteria;
 
 import android.Manifest;
 import android.app.Activity;
+import android.app.NotificationManager;
 import android.content.Intent;
 import android.content.pm.PackageManager;
 import android.net.Uri;
@@ -43,6 +44,16 @@ public class MainActivity extends Activity {
      * pedido, y caer en la pantalla del día lo obligaría a buscarlo.
      */
     public static final String EXTRA_URL = "url";
+
+    /**
+     * La URL del chat que el cadete tiene en pantalla AHORA, o {@code null}.
+     *
+     * <p>La lee {@link AvisosService} para no notificar un mensaje que el cadete
+     * ya está viendo. Estático porque el servicio y la actividad viven en el
+     * mismo proceso y no hay nada más que compartir; {@code volatile} porque el
+     * servicio lo lee desde su propio hilo.
+     */
+    static volatile String chatEnPantalla;
 
     private WebView web;
 
@@ -139,6 +150,7 @@ public class MainActivity extends Activity {
 
             @Override
             public void onPageFinished(WebView v, String url) {
+                marcarChatEnPantalla(url);
                 // El admin de Django es SÓLO la puerta de login (la pantalla
                 // usa sesión y redirige ahí). Si el cadete queda en el índice
                 // del admin se encierra: esa página no linkea a /cadeteria/ y
@@ -178,10 +190,38 @@ public class MainActivity extends Activity {
         // obligatoria. `Actualizaciones` trae su propio freno para no gastar la
         // cuota de la API de GitHub.
         Actualizaciones.chequearSiCorresponde(this);
+        marcarChatEnPantalla(web.getUrl());
         // Y se vuelve a intentar arrancar la escucha de avisos: Android pudo
         // matar el servicio por memoria, o negarse a arrancarlo la primera vez
         // (la app todavía no estaba visible). Arrancarlo dos veces no hace nada.
         AvisosService.arrancar(this);
+    }
+
+    @Override
+    protected void onPause() {
+        super.onPause();
+        // Con la app en segundo plano el chat ya no está a la vista: los
+        // mensajes nuevos tienen que volver a notificarse.
+        chatEnPantalla = null;
+    }
+
+    /**
+     * Si la URL es un chat de reclamo, lo marca como a la vista y le borra la
+     * notificación: el cadete ya está leyendo esa conversación.
+     */
+    private void marcarChatEnPantalla(String url) {
+        if (url == null || !url.contains("/cadeteria/reclamo/")
+                || !url.contains("/chat/")) {
+            chatEnPantalla = null;
+            return;
+        }
+        int corte = url.indexOf('?');
+        String chat = corte >= 0 ? url.substring(0, corte) : url;
+        chatEnPantalla = chat;
+        NotificationManager nm = getSystemService(NotificationManager.class);
+        if (nm != null) {
+            nm.cancel(AvisosService.idNotificacion(chat, ""));
+        }
     }
 
     @Override

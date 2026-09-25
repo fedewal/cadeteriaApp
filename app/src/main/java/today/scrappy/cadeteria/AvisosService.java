@@ -222,9 +222,26 @@ public class AvisosService extends Service {
         // para que tocar la notificación abra ESE pedido, y no la pantalla del
         // día: el cadete está esperando una respuesta puntual.
         String destino = primeraUrl(cuerpo);
+        if (destino != null && destino.equals(MainActivity.chatEnPantalla)) {
+            // El cadete está mirando ESE chat: el mensaje ya le aparece en la
+            // pantalla por el polling. Una notificación además es ruido, y se
+            // queda en la barra aunque ya la haya leído.
+            Log.i(TAG, "aviso de un chat que está en pantalla: no se notifica");
+            return;
+        }
         notificar(titulo == null ? "Cadetería" : titulo,
                   destino == null ? cuerpo : cuerpo.replace(destino, "").trim(),
-                  destino, id.hashCode());
+                  destino, idNotificacion(destino, id));
+    }
+
+    /**
+     * Un id por CHAT, no por mensaje. Así tres respuestas al mismo pedido son una
+     * sola notificación que se actualiza, y abrir ese chat la puede borrar
+     * sabiendo cuál es (ver {@link MainActivity}). Con un id por mensaje se
+     * apilaban y quedaban en la barra aunque el cadete ya estuviera leyendo.
+     */
+    static int idNotificacion(String destino, String idMensaje) {
+        return destino != null ? destino.hashCode() : idMensaje.hashCode();
     }
 
     private void notificar(String titulo, String texto, String destino, int id) {
