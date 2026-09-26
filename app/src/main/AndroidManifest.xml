@@ -28,12 +28,22 @@
          instale tambien la app de ntfy: dos apps para configurar en cada
          telefono, y una suscripcion que cualquiera puede borrar o silenciar sin
          que nadie se entere. Ver AvisosService.
-         SIGUE sin haber NADA de ubicacion: eso espera al rastreo propio del
-         recorrido, que hoy lo cubre SimpliRoute. -->
+         (La ubicacion va aparte, abajo: es otro servicio, con otro tipo.) -->
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
+
+    <!-- UBICACION: un punto cada 10 s para el mapa del centro de mando (hito 2),
+         el mismo seguimiento que vendedoresApp. Hasta la 0.6 no habia nada de
+         ubicacion porque el recorrido lo cubria SimpliRoute; el mapa necesita
+         la linea completa, parado incluido, y SimpliRoute no la da.
+         BACKGROUND hace falta para seguir con la pantalla apagada (Android 10+),
+         y FOREGROUND_SERVICE_LOCATION para el tipo del servicio (Android 14). -->
+    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
+    <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
+    <uses-permission android:name="android.permission.ACCESS_BACKGROUND_LOCATION" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_LOCATION" />
 
     <application
         android:allowBackup="false"
@@ -64,6 +74,14 @@
             android:name=".AvisosService"
             android:exported="false"
             android:foregroundServiceType="dataSync" />
+
+        <!-- Aparte de AvisosService a proposito: tipos distintos (`location`
+             contra `dataSync`) y cada uno con su canal, asi que sin permiso de
+             ubicacion los avisos siguen andando. -->
+        <service
+            android:name=".UbicacionService"
+            android:exported="false"
+            android:foregroundServiceType="location" />
 
         <receiver
             android:name=".ArranqueReceiver"

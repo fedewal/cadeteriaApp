@@ -24,11 +24,12 @@ import android.webkit.WebViewClient;
  * aporta hoy es el ícono en el launcher, arrancar sin la barra del navegador
  * y avisar cuando hay una versión nueva.
  *
- * <p>A diferencia de vendedoresApp, acá NO hay servicio de ubicación. El único
- * permiso sensible es la CÁMARA, y existe por una sola razón: escanear la
- * etiqueta del equipo al cerrar un evento. Se pide cuando la pantalla la usa, no
- * al instalar. Cuando exista el rastreo propio del recorrido, esa tarea agrega lo
- * que necesite.
+ * <p>Permisos sensibles: la CÁMARA, para escanear la etiqueta del equipo al
+ * cerrar un evento (se pide cuando la pantalla la usa, no al instalar), y la
+ * UBICACIÓN, para el mapa del centro de mando ({@link UbicacionService}, el
+ * mismo seguimiento que vendedoresApp). La ubicación se pide al abrir,
+ * encadenada con las notificaciones: ubicación → notificaciones → segundo
+ * plano.
  */
 public class MainActivity extends Activity {
 
@@ -40,6 +41,8 @@ public class MainActivity extends Activity {
     /** Código propio para la respuesta de {@link #onRequestPermissionsResult}. */
     private static final int PIDO_CAMARA = 1;
     private static final int PIDO_AVISOS = 2;
+    private static final int PIDO_UBICACION = 3;
+    private static final int PIDO_SEGUNDO_PLANO = 4;
 
     /**
      * Con qué URL abrir, en vez del día. La pone la notificación de una
@@ -182,10 +185,12 @@ public class MainActivity extends Activity {
             web.restoreState(savedInstanceState);
         }
 
-        // Los avisos de administración. El permiso se pide acá y no al instalar:
-        // Android 13+ lo exige en tiempo de ejecución, y si se niega la app
-        // sigue funcionando entera — el cadete se entera entrando a sus pedidos.
-        pedirAvisos();
+        // Ubicación, avisos de administración y segundo plano, en cadena: Android
+        // muestra un diálogo por vez. Se piden acá y no al instalar porque
+        // Android los exige en tiempo de ejecución; si se niega alguno la app
+        // sigue funcionando entera (sin mapa, o el cadete se entera de las
+        // respuestas entrando a sus pedidos).
+        pedirPermisos();
 
         // Al abrir, y en segundo plano: si hay una versión nueva publicada el
         // cadete se entera solo, sin que nadie tenga que avisarle.
@@ -205,6 +210,9 @@ public class MainActivity extends Activity {
         // matar el servicio por memoria, o negarse a arrancarlo la primera vez
         // (la app todavía no estaba visible). Arrancarlo dos veces no hace nada.
         AvisosService.arrancar(this);
+        // Lo mismo con la ubicación, que además puede haberse concedido
+        // recién desde los ajustes. Sin permiso `arrancar` no hace nada.
+        UbicacionService.arrancar(this);
     }
 
     @Override
@@ -280,11 +288,23 @@ public class MainActivity extends Activity {
     public void onRequestPermissionsResult(int codigo, String[] permisos,
                                            int[] resultados) {
         super.onRequestPermissionsResult(codigo, permisos, resultados);
+        if (codigo == PIDO_UBICACION) {
+            // Concedida o no, se sigue con las notificaciones: negar la
+            // ubicación no tiene por qué dejar al cadete sin avisos.
+            pedirAvisos();
+            return;
+        }
         if (codigo == PIDO_AVISOS) {
             // Concedido o no, la escucha arranca: sin permiso no va a poder
             // mostrar la notificación, pero el permiso se puede dar después
             // desde los ajustes y entonces ya está escuchando.
-            AvisosService.arrancar(this);
+            pedirSegundoPlanoYArrancar();
+            return;
+        }
+        if (codigo == PIDO_SEGUNDO_PLANO) {
+            // Con o sin "todo el tiempo": sin él sigue registrando mientras
+            // la app está abierta.
+            UbicacionService.arrancar(this);
             return;
         }
         if (codigo != PIDO_CAMARA) {
@@ -325,6 +345,19 @@ public class MainActivity extends Activity {
         return url;
     }
 
+    /** Primer eslabón: la ubicación en primer plano. */
+    private void pedirPermisos() {
+        if (checkSelfPermission(Manifest.permission.ACCESS_FINE_LOCATION)
+                != PackageManager.PERMISSION_GRANTED) {
+            requestPermissions(new String[]{
+                    Manifest.permission.ACCESS_FINE_LOCATION,
+                    Manifest.permission.ACCESS_COARSE_LOCATION},
+                    PIDO_UBICACION);
+            return;
+        }
+        pedirAvisos();
+    }
+
     private void pedirAvisos() {
         if (Build.VERSION.SDK_INT >= 33
                 && checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS)
@@ -336,7 +369,29 @@ public class MainActivity extends Activity {
             // aviso, y así el cartel de estado no depende de la respuesta.
             return;
         }
+        pedirSegundoPlanoYArrancar();
+    }
+
+    /**
+     * Último eslabón: la ubicación "todo el tiempo", y arrancar los dos
+     * servicios. Va DESPUÉS de la de primer plano porque Android rechaza el
+     * pedido si vienen juntas (y desde Android 11 ni muestra diálogo: manda a
+     * los ajustes).
+     */
+    private void pedirSegundoPlanoYArrancar() {
         AvisosService.arrancar(this);
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q
+                && checkSelfPermission(Manifest.permission.ACCESS_FINE_LOCATION)
+                    == PackageManager.PERMISSION_GRANTED
+                && checkSelfPermission(Manifest.permission.ACCESS_BACKGROUND_LOCATION)
+                    != PackageManager.PERMISSION_GRANTED) {
+            requestPermissions(
+                    new String[]{Manifest.permission.ACCESS_BACKGROUND_LOCATION},
+                    PIDO_SEGUNDO_PLANO);
+        }
+        // Arranca ya con el permiso de primer plano; el seguimiento con la
+        // pantalla apagada empieza cuando se conceda "todo el tiempo".
+        UbicacionService.arrancar(this);
     }
 
     private void abrirAfuera(Uri destino) {

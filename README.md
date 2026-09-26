@@ -6,12 +6,11 @@ backend de Scrappy).
 **No es un port.** La pantalla vive en Django y se ve en un WebView: un cambio
 le llega al cadete recargando, sin publicar un APK nuevo.
 
-A diferencia de [vendedoresApp](https://github.com/fedewal/vendedoresApp), esta
-app **no tiene nada nativo todavía**. Lo único que aporta sobre abrir la URL en
-Chrome es el ícono en el launcher, arrancar sin la barra del navegador, y avisar
-cuando hay una versión nueva. Por eso pide **sólo permiso de internet**: no hay
-ubicación, ni notificaciones, ni servicio en segundo plano. Cuando exista el
-rastreo propio del recorrido, eso se agrega acá.
+Lo que aporta sobre abrir la URL en Chrome: el ícono en el launcher, arrancar
+sin la barra del navegador, avisar cuando hay una versión nueva, los avisos de
+administración con el teléfono en el bolsillo y, desde la 0.7.0, **la ubicación
+del cadete para el mapa del centro de mando** — el mismo seguimiento que
+[vendedoresApp](https://github.com/fedewal/vendedoresApp).
 
 La pantalla también se puede instalar **sin este APK**: Chrome en el teléfono,
 entrar a `/cadeteria/` y "Agregar a pantalla de inicio". El APK existe para
@@ -22,8 +21,18 @@ distribuirla y actualizarla igual que la de vendedores.
 Bajar el APK de [Releases](../../releases), abrirlo en el teléfono y aceptar
 "instalar apps de orígenes desconocidos" cuando Android lo pida.
 
-No hay nada más que configurar: sin permisos que conceder ni ajustes de batería
-que tocar, porque no hay ningún servicio que Android pueda matar.
+Después de instalar, **en cada teléfono**, o el seguimiento se corta con la
+pantalla apagada:
+
+1. **Ubicación → Permitir todo el tiempo.** La app la pide al abrir (primero
+   "mientras se usa", después "todo el tiempo"); si Android manda a los ajustes:
+   Ajustes → Aplicaciones → Cadetería → Permisos → Ubicación → "Permitir todo el
+   tiempo".
+2. **Batería sin restricciones** (Ajustes → Aplicaciones → Cadetería → Batería).
+   One UI mata los servicios en segundo plano y el rastreo se corta a las pocas
+   horas.
+3. **Notificaciones permitidas**: los dos servicios en primer plano necesitan
+   su notificación.
 
 El cadete necesita **usuario y contraseña**. Los crea administración con:
 
@@ -44,6 +53,15 @@ visita.
   si el login deja al cadete en el índice del admin de Django lo devuelve a la
   pantalla del día. Eso último no es teórico: pasó probando vendedoresApp
   v0.1.0, y sin barra de navegador la app queda encerrada.
+- **`UbicacionService`** — servicio en primer plano (`location`) que toma **un
+  punto cada 10 s, mandados en tanda cada minuto** a `POST /cadeteria/ubicacion/`
+  (`puntos` = JSON con `lat`, `lon`, `precision` y `t`, la hora del teléfono en
+  milisegundos). Parado también toma puntos: es lo que deja ver cuánto estuvo en
+  cada lugar. Si la tanda no llega (sin señal, sesión vencida → 302), los puntos
+  esperan a la siguiente, hasta 600 (100 minutos); el servidor descarta los
+  repetidos. Es un servicio **aparte** de `AvisosService` (`dataSync`), con su
+  propio canal de notificación: sin permiso de ubicación los avisos siguen
+  andando. `ArranqueReceiver` levanta los dos al reiniciar el teléfono.
 - **`Actualizaciones`** — pregunta a la API de Releases de GitHub al abrir. No
   descarga ni instala sola: abre el APK y el instalador del sistema hace el
   resto. Falla en silencio, porque es un aviso y no algo de lo que dependa el
