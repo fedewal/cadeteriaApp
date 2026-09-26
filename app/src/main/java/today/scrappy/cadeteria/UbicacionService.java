@@ -119,7 +119,18 @@ public class UbicacionService extends Service {
     public void onCreate() {
         super.onCreate();
         crearCanal();
-        startForeground(NOTIFICACION, notificacion());
+        try {
+            startForeground(NOTIFICACION, notificacion());
+        } catch (SecurityException e) {
+            // Con targetSdk 34, un servicio `location` arrancado sin la app a
+            // la vista (al reiniciar el teléfono, o un reinicio de START_STICKY)
+            // necesita "todo el tiempo"; con "mientras se usa" esto revienta
+            // y Android muestra "la app se detuvo". Se baja callado y vuelve
+            // a arrancar la próxima vez que se abra la app.
+            Log.w(TAG, "sin permiso para seguir en segundo plano", e);
+            stopSelf();
+            return;
+        }
 
         if (checkSelfPermission(Manifest.permission.ACCESS_FINE_LOCATION)
                 != PackageManager.PERMISSION_GRANTED) {
@@ -246,11 +257,15 @@ public class UbicacionService extends Service {
                         salida.write(cuerpo.getBytes(StandardCharsets.UTF_8));
                     }
                     int codigo = con.getResponseCode();
-                    llego = codigo == 204;
-                    if (!llego) {
-                        // 302 = sesión vencida: la tanda espera a que vuelva
-                        // a entrar (hasta el techo del buffer).
-                        Log.w(TAG, "el servidor no tomó la tanda: " + codigo);
+                    // 302 = sesión vencida y 5xx = servidor caído: la tanda
+                    // espera (hasta el techo del buffer). Otro 4xx (un 403 a
+                    // quien entró pero no es vendedor/cadete activo) no se
+                    // arregla reintentando: se tira, o serían 600 puntos
+                    // reenviados cada minuto para siempre.
+                    llego = codigo == 204 || (codigo >= 400 && codigo < 500);
+                    if (codigo != 204) {
+                        Log.w(TAG, "el servidor no tomó la tanda: " + codigo
+                                + (llego ? " (se descarta)" : " (se reintenta)"));
                     }
                 } catch (Exception e) {
                     Log.w(TAG, "no se pudo mandar la tanda", e);
