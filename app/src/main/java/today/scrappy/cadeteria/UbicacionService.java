@@ -77,17 +77,12 @@ public class UbicacionService extends Service {
      *  viejos: el buffer no crece sin techo en un teléfono que no vuelve a
      *  tener red. */
     private static final int MAX_PENDIENTES = 600;
-    /** Un punto de red dentro de los 20 s de uno de GPS se ignora: la red
-     *  salta 100 m y le mete dientes a una línea que el GPS dibuja bien.
-     *  Pasados 20 s sin GPS (adentro de un local) la red vuelve a valer. */
-    private static final long GPS_MANDA_MS = 20_000L;
 
     private LocationManager gestor;
     private LocationListener oyente;
     /** Siempre bajo su propio candado: lo tocan el main looper y el hilo
      *  del envío. */
     private final ArrayList<JSONObject> pendientes = new ArrayList<>();
-    private long ultimoGps = 0L;
     private final Handler reloj = new Handler(Looper.getMainLooper());
     private final Runnable cadaMinuto = new Runnable() {
         @Override
@@ -156,10 +151,15 @@ public class UbicacionService extends Service {
             public void onProviderDisabled(String proveedor) { }
         };
 
+        // SÓLO GPS (pedido de Federico, 2026-09-27). Antes se pedía también la
+        // ubicación por red (antena/WiFi) para tener algo adentro de un local,
+        // y resultó peor que nada: un punto de WiFi puede DECLARAR 40 m de
+        // precisión y estar a 1,5 km (medido: saltos de 1.500 m ida y vuelta
+        // en 20 s, 290 km/h, con precisión declarada de 42-46 m), así que ni
+        // el filtro por precisión del mapa los caza. Adentro de un local el
+        // GPS no engancha y no llega nada: el mapa muestra el último punto
+        // bueno con su antigüedad, que es la verdad.
         pedirA(LocationManager.GPS_PROVIDER);
-        // También por red: adentro de un local el GPS no engancha, y una
-        // posición aproximada es mejor que ninguna.
-        pedirA(LocationManager.NETWORK_PROVIDER);
         reloj.postDelayed(cadaMinuto, ENVIO_MS);
     }
 
@@ -174,13 +174,8 @@ public class UbicacionService extends Service {
     }
 
     private void anotar(Location punto) {
-        // Llega en el main looper (requestLocationUpdates sin looper usa el
-        // del hilo que lo pidió), así que ultimoGps no necesita candado.
-        if (LocationManager.GPS_PROVIDER.equals(punto.getProvider())) {
-            ultimoGps = punto.getTime();
-        } else if (LocationManager.NETWORK_PROVIDER.equals(punto.getProvider())
-                && punto.getTime() - ultimoGps < GPS_MANDA_MS) {
-            return;
+        if (!LocationManager.GPS_PROVIDER.equals(punto.getProvider())) {
+            return;  // sólo GPS: ver el comentario de pedirA en onCreate
         }
         try {
             JSONObject p = new JSONObject();
