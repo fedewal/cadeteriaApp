@@ -58,8 +58,6 @@ import java.util.List;
 public class UbicacionService extends Service {
 
     private static final String TAG = "UbicacionService";
-    private static final String CANAL = "ubicacion";
-    private static final int NOTIFICACION = 1;
 
     private static final String RUTA = "/cadeteria/ubicacion/";
     private static final String REFERER = "/cadeteria/";
@@ -117,9 +115,8 @@ public class UbicacionService extends Service {
     @Override
     public void onCreate() {
         super.onCreate();
-        crearCanal();
         try {
-            startForeground(NOTIFICACION, notificacion());
+            startForeground(NotificacionFija.ID, NotificacionFija.crear(this));
         } catch (SecurityException e) {
             // Con targetSdk 34, un servicio `location` arrancado sin la app a
             // la vista (al reiniciar el teléfono, o un reinicio de START_STICKY)
@@ -303,27 +300,6 @@ public class UbicacionService extends Service {
             }
         }
         return null;
-    }
-
-    private void crearCanal() {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            NotificationChannel canal = new NotificationChannel(
-                    CANAL, "Ubicación", NotificationManager.IMPORTANCE_LOW);
-            canal.setDescription("Avisa que la app está registrando dónde estás.");
-            NotificationManager nm = getSystemService(NotificationManager.class);
-            if (nm != null) {
-                nm.createNotificationChannel(canal);
-            }
-        }
-    }
-
-    private Notification notificacion() {
-        return new Notification.Builder(this, CANAL)
-                .setContentTitle("Cadetería")
-                .setContentText("Registrando tu ubicación mientras trabajás")
-                .setSmallIcon(android.R.drawable.ic_menu_mylocation)
-                .setOngoing(true)
-                .build();
     }
 
     @Override

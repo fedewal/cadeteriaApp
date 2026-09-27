@@ -48,7 +48,6 @@ import java.nio.charset.StandardCharsets;
 public class AvisosService extends Service {
 
     private static final String TAG = "AvisosService";
-    private static final String CANAL_ESTADO = "avisos_estado";
     private static final String CANAL_AVISOS = "avisos";
     private static final int NOTIFICACION = 2;
 
@@ -83,7 +82,8 @@ public class AvisosService extends Service {
     public void onCreate() {
         super.onCreate();
         crearCanales();
-        startForeground(NOTIFICACION, notificacionDeEstado());
+        // La misma notificación fija que el servicio de ubicación: una sola.
+        startForeground(NotificacionFija.ID, NotificacionFija.crear(this));
         oyente = new Thread(new Runnable() {
             @Override
             public void run() {
@@ -334,34 +334,11 @@ public class AvisosService extends Service {
         if (nm == null) {
             return;
         }
-        // El cartel de "estoy escuchando": importancia MÍNIMA para que quede
-        // plegado y sin sonido. Es obligatorio (servicio en primer plano), no
-        // es un aviso.
-        NotificationChannel estado = new NotificationChannel(
-                CANAL_ESTADO, "Avisos activos", NotificationManager.IMPORTANCE_MIN);
-        estado.setDescription("Avisa que la app está esperando respuestas de "
-                + "administración.");
-        estado.setShowBadge(false);
-        nm.createNotificationChannel(estado);
-
         NotificationChannel avisos = new NotificationChannel(
                 CANAL_AVISOS, "Respuestas de administración",
                 NotificationManager.IMPORTANCE_HIGH);
         avisos.setDescription("Cuando administración contesta un pedido tuyo.");
         nm.createNotificationChannel(avisos);
-    }
-
-    private Notification notificacionDeEstado() {
-        Intent abrir = new Intent(this, MainActivity.class);
-        abrir.setFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_SINGLE_TOP);
-        return new Notification.Builder(this, CANAL_ESTADO)
-                .setContentTitle("Cadetería")
-                .setContentText("Escuchando respuestas de administración")
-                .setSmallIcon(android.R.drawable.ic_popup_reminder)
-                .setContentIntent(PendingIntent.getActivity(this, 0, abrir,
-                        PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE))
-                .setOngoing(true)
-                .build();
     }
 
     @Override
