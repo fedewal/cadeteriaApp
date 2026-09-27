@@ -99,6 +99,12 @@
             android:enabled="true">
             <intent-filter>
                 <action android:name="android.intent.action.BOOT_COMPLETED" />
+                <!-- Al ACTUALIZAR la app Android mata el servicio y no lo
+                     vuelve a levantar hasta que se abre la app: con las
+                     actualizaciones obligatorias, cada versión nueva cortaba el
+                     seguimiento de todos (medido el 2026-09-27). Android deja
+                     arrancar un servicio en primer plano desde este aviso. -->
+                <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
             </intent-filter>
         </receiver>
     </application>

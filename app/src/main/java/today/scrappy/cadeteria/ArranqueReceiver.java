@@ -18,7 +18,11 @@ import android.os.Build;
 public class ArranqueReceiver extends BroadcastReceiver {
     @Override
     public void onReceive(Context contexto, Intent intent) {
-        if (Intent.ACTION_BOOT_COMPLETED.equals(intent.getAction())) {
+        // Reinicio del teléfono o actualización de la app: en los dos casos
+        // Android dejó el servicio muerto y nadie lo va a abrir para revivirlo.
+        String accion = intent.getAction();
+        if (Intent.ACTION_BOOT_COMPLETED.equals(accion)
+                || Intent.ACTION_MY_PACKAGE_REPLACED.equals(accion)) {
             AvisosService.arrancar(contexto);
             // Al arrancar el teléfono la app no está a la vista, y Android sólo deja
             // correr el seguimiento con "todo el tiempo" (Android 10+). Con

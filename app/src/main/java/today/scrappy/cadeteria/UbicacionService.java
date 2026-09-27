@@ -220,7 +220,17 @@ public class UbicacionService extends Service {
             tanda = new ArrayList<>(pendientes);
             pendientes.clear();
         }
-        final String salud = Salud.paraElServidor(this).toString();
+        // Un error revisando la salud NUNCA puede frenar la ubicación: corre en
+        // el looper principal, y una excepción acá mataba el proceso entero a
+        // cada minuto (pasó en vendedores v0.3.0). Sin salud, la tanda sale igual.
+        String saludLeida;
+        try {
+            saludLeida = Salud.paraElServidor(this).toString();
+        } catch (Exception e) {
+            Log.w(TAG, "no se pudo revisar la salud", e);
+            saludLeida = "{}";
+        }
+        final String salud = saludLeida;
         new Thread(new Runnable() {
             @Override
             public void run() {

@@ -260,7 +260,14 @@ public class MainActivity extends Activity {
      * persona va a los ajustes, lo arregla, y al volver el cartel no está.
      */
     private void revisarSalud() {
-        List<Salud.Item> mal = Salud.criticosFallando(this);
+        List<Salud.Item> mal;
+        try {
+            mal = Salud.criticosFallando(this);
+        } catch (Exception e) {
+            // El cartel es una ayuda: si revisar falla, la app sigue igual.
+            cartelSalud.setVisibility(View.GONE);
+            return;
+        }
         if (mal.isEmpty()) {
             cartelSalud.setVisibility(View.GONE);
             return;
