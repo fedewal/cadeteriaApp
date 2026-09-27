@@ -67,6 +67,13 @@
             </intent-filter>
         </activity>
 
+        <!-- La sección de Salud (permisos, GPS, batería). La abre el link
+             scrappy://salud de la página, que intercepta MainActivity. -->
+        <activity
+            android:name=".SaludActivity"
+            android:exported="false"
+            android:label="Salud del teléfono" />
+
         <!-- `dataSync` y no `remoteMessaging` porque `targetSdk` es 34. OJO al
              subirlo a 35+: ahi Android 15 le pone un tope de 6 h por dia a
              `dataSync`, y un cadete trabaja mas que eso; el tipo correcto

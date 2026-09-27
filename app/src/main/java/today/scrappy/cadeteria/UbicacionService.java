@@ -78,6 +78,10 @@ public class UbicacionService extends Service {
      *  tener red. */
     private static final int MAX_PENDIENTES = 600;
 
+    /** Cuándo se anotó el último punto de GPS (hora del teléfono), o 0. Lo
+     *  muestra la sección de Salud: es la prueba de que todo lo demás anda. */
+    static volatile long ultimoPuntoMs = 0L;
+
     private LocationManager gestor;
     private LocationListener oyente;
     /** Siempre bajo su propio candado: lo tocan el main looper y el hilo
@@ -165,9 +169,11 @@ public class UbicacionService extends Service {
 
     private void pedirA(String proveedor) {
         try {
-            if (gestor.isProviderEnabled(proveedor)) {
-                gestor.requestLocationUpdates(proveedor, CADA_MS, MINIMO_METROS, oyente);
-            }
+            // Aunque la ubicación esté apagada AHORA: Android acepta el pedido
+            // y entrega en cuanto se prende. Antes se pedía sólo si estaba
+            // prendida al arrancar, y prenderla después no servía de nada
+            // hasta reiniciar la app.
+            gestor.requestLocationUpdates(proveedor, CADA_MS, MINIMO_METROS, oyente);
         } catch (SecurityException | IllegalArgumentException e) {
             Log.w(TAG, "no se pudo escuchar " + proveedor, e);
         }
@@ -177,6 +183,7 @@ public class UbicacionService extends Service {
         if (!LocationManager.GPS_PROVIDER.equals(punto.getProvider())) {
             return;  // sólo GPS: ver el comentario de pedirA en onCreate
         }
+        ultimoPuntoMs = punto.getTime();
         try {
             JSONObject p = new JSONObject();
             p.put("lat", punto.getLatitude());
@@ -205,14 +212,15 @@ public class UbicacionService extends Service {
     }
 
     private void enviarTanda() {
+        // Sale SIEMPRE, aunque no haya puntos: la tanda lleva la salud del
+        // teléfono, y es justo cuando no hay puntos (GPS apagado, ahorro de
+        // batería) que el centro de mando tiene que saber por qué.
         final List<JSONObject> tanda;
         synchronized (pendientes) {
-            if (pendientes.isEmpty()) {
-                return;
-            }
             tanda = new ArrayList<>(pendientes);
             pendientes.clear();
         }
+        final String salud = Salud.paraElServidor(this).toString();
         new Thread(new Runnable() {
             @Override
             public void run() {
@@ -247,7 +255,8 @@ public class UbicacionService extends Service {
                     }
 
                     String cuerpo = "puntos=" + URLEncoder.encode(
-                            new JSONArray(tanda).toString(), "UTF-8");
+                            new JSONArray(tanda).toString(), "UTF-8")
+                            + "&salud=" + URLEncoder.encode(salud, "UTF-8");
                     try (OutputStream salida = con.getOutputStream()) {
                         salida.write(cuerpo.getBytes(StandardCharsets.UTF_8));
                     }

@@ -9,6 +9,8 @@ import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
 import android.provider.Settings;
+import android.util.TypedValue;
+import android.view.View;
 import android.os.PowerManager;
 import android.webkit.CookieManager;
 import android.webkit.PermissionRequest;
@@ -17,6 +19,10 @@ import android.webkit.WebResourceRequest;
 import android.webkit.WebSettings;
 import android.webkit.WebView;
 import android.webkit.WebViewClient;
+import android.widget.LinearLayout;
+import android.widget.TextView;
+
+import java.util.List;
 
 /**
  * El caparazón: muestra la pantalla del cadete, que vive en Django.
@@ -64,6 +70,8 @@ public class MainActivity extends Activity {
     static volatile String chatEnPantalla;
 
     private WebView web;
+    /** El cartel rojo de arriba (ver `revisarSalud`). */
+    private TextView cartelSalud;
 
     /**
      * El pedido de la página que quedó esperando a que Android conteste.
@@ -87,7 +95,28 @@ public class MainActivity extends Activity {
         getWindow().setStatusBarColor(AZUL);
 
         web = new WebView(this);
-        setContentView(web);
+        // El cartel rojo arriba de la página cuando algo impide que la
+        // ubicación llegue (ver `revisarSalud`). Es nativo porque lo que revisa
+        // sólo lo sabe el teléfono; lleva a la sección de Salud.
+        cartelSalud = new TextView(this);
+        cartelSalud.setBackgroundColor(0xFFD63C3C);
+        cartelSalud.setTextColor(0xFFFFFFFF);
+        cartelSalud.setTextSize(TypedValue.COMPLEX_UNIT_SP, 14);
+        int pad = Math.round(12 * getResources().getDisplayMetrics().density);
+        cartelSalud.setPadding(pad, pad, pad, pad);
+        cartelSalud.setVisibility(View.GONE);
+        cartelSalud.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                startActivity(new Intent(MainActivity.this, SaludActivity.class));
+            }
+        });
+        LinearLayout raiz = new LinearLayout(this);
+        raiz.setOrientation(LinearLayout.VERTICAL);
+        raiz.addView(cartelSalud);
+        raiz.addView(web, new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, 0, 1f));
+        setContentView(raiz);
 
         WebSettings ajustes = web.getSettings();
         ajustes.setJavaScriptEnabled(true);
@@ -149,6 +178,13 @@ public class MainActivity extends Activity {
                 // `tel:`, `whatsapp:` y `mailto:` no son páginas. Van al
                 // sistema, o el día que la pantalla tenga un botón de llamar
                 // al cliente no haría nada.
+                // `scrappy://salud`: el link de los menús web a la sección
+                // nativa de Salud. Va antes que los otros esquemas o se iría
+                // afuera como si fuera un `tel:`.
+                if ("scrappy".equals(esquema) && "salud".equals(destino.getHost())) {
+                    startActivity(new Intent(MainActivity.this, SaludActivity.class));
+                    return true;
+                }
                 if (esquema != null && !esquema.equals("http") && !esquema.equals("https")) {
                     abrirAfuera(destino);
                     return true;
@@ -215,6 +251,27 @@ public class MainActivity extends Activity {
         // Lo mismo con la ubicación, que además puede haberse concedido
         // recién desde los ajustes. Sin permiso `arrancar` no hace nada.
         UbicacionService.arrancar(this);
+        revisarSalud();
+    }
+
+    /**
+     * Muestra el cartel rojo si algo impide que la ubicación llegue, y lo
+     * esconde si ya está todo bien. Se revisa en cada vuelta al frente: la
+     * persona va a los ajustes, lo arregla, y al volver el cartel no está.
+     */
+    private void revisarSalud() {
+        List<Salud.Item> mal = Salud.criticosFallando(this);
+        if (mal.isEmpty()) {
+            cartelSalud.setVisibility(View.GONE);
+            return;
+        }
+        // Genérico a propósito: los títulos de los chequeos están en positivo
+        // ("Ahorro de batería apagado") y citarlos acá diría lo contrario de lo
+        // que pasa. El detalle está en la sección.
+        cartelSalud.setText("⚠  Tu ubicación no llega al centro de mando ("
+                + mal.size() + (mal.size() == 1 ? " cosa" : " cosas")
+                + " para arreglar). Tocá acá.");
+        cartelSalud.setVisibility(View.VISIBLE);
     }
 
     @Override
