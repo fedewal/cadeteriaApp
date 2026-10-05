@@ -3,17 +3,21 @@ package today.scrappy.cadeteria;
 import android.Manifest;
 import android.app.Activity;
 import android.app.NotificationManager;
+import android.content.ActivityNotFoundException;
+import android.content.ContentValues;
 import android.content.Intent;
 import android.content.pm.PackageManager;
 import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
+import android.provider.MediaStore;
 import android.provider.Settings;
 import android.util.TypedValue;
 import android.view.View;
 import android.os.PowerManager;
 import android.webkit.CookieManager;
 import android.webkit.PermissionRequest;
+import android.webkit.ValueCallback;
 import android.webkit.WebChromeClient;
 import android.webkit.WebResourceRequest;
 import android.webkit.WebSettings;
@@ -51,6 +55,18 @@ public class MainActivity extends Activity {
     private static final int PIDO_AVISOS = 2;
     private static final int PIDO_UBICACION = 3;
     private static final int PIDO_SEGUNDO_PLANO = 4;
+    private static final int PIDO_CAMARA_FOTO = 5;
+    private static final int ELIJO_FOTO = 6;
+
+    /**
+     * El `<input type="file">` que espera una foto. Sin `onShowFileChooser` el
+     * WebView no hace NADA al tocarlo (reportado 2026-10-05: "me pide foto
+     * pero no me deja cargarla").
+     */
+    private ValueCallback<Uri[]> fotoPendiente;
+    private WebChromeClient.FileChooserParams fotoParams;
+    /** Dónde escribe la cámara la foto que se está sacando. */
+    private Uri fotoSacada;
 
     /**
      * Con qué URL abrir, en vez del día. La pone la notificación de una
@@ -167,6 +183,25 @@ public class MainActivity extends Activity {
             @Override
             public void onPermissionRequestCanceled(PermissionRequest pedido) {
                 camaraPendiente = null;
+            }
+
+            @Override
+            public boolean onShowFileChooser(WebView v, ValueCallback<Uri[]> callback,
+                                             FileChooserParams params) {
+                if (fotoPendiente != null) {
+                    // Un pedido anterior sin contestar deja el input trabado.
+                    fotoPendiente.onReceiveValue(null);
+                }
+                fotoPendiente = callback;
+                fotoParams = params;
+                if (checkSelfPermission(Manifest.permission.CAMERA)
+                        == PackageManager.PERMISSION_GRANTED) {
+                    elegirFoto(true);
+                } else {
+                    requestPermissions(new String[]{Manifest.permission.CAMERA},
+                            PIDO_CAMARA_FOTO);
+                }
+                return true;
             }
         });
 
@@ -350,10 +385,100 @@ public class MainActivity extends Activity {
         pedido.grant(new String[]{PermissionRequest.RESOURCE_VIDEO_CAPTURE});
     }
 
+    /**
+     * Abre la cámara (si la página pidió `capture`) o un selector con la
+     * cámara y la galería. La cámara escribe en MediaStore porque la app no
+     * tiene `FileProvider` (no usa androidx, ver build.gradle); desde Android
+     * 10 eso no pide permiso de almacenamiento. En 8 y 9 queda sólo la galería.
+     */
+    private void elegirFoto(boolean hayCamara) {
+        Intent camara = null;
+        if (hayCamara && Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            ContentValues datos = new ContentValues();
+            datos.put(MediaStore.Images.Media.DISPLAY_NAME,
+                    "cadeteria_" + System.currentTimeMillis() + ".jpg");
+            datos.put(MediaStore.Images.Media.MIME_TYPE, "image/jpeg");
+            datos.put(MediaStore.Images.Media.RELATIVE_PATH, "Pictures/Cadeteria");
+            try {
+                fotoSacada = getContentResolver().insert(
+                        MediaStore.Images.Media.EXTERNAL_CONTENT_URI, datos);
+            } catch (RuntimeException e) {
+                fotoSacada = null;
+            }
+            if (fotoSacada != null) {
+                camara = new Intent(MediaStore.ACTION_IMAGE_CAPTURE)
+                        .putExtra(MediaStore.EXTRA_OUTPUT, fotoSacada)
+                        .addFlags(Intent.FLAG_GRANT_WRITE_URI_PERMISSION);
+            }
+        }
+        Intent galeria = fotoParams != null ? fotoParams.createIntent()
+                : new Intent(Intent.ACTION_GET_CONTENT).setType("image/*");
+        Intent abrir;
+        if (camara != null && fotoParams != null && fotoParams.isCaptureEnabled()) {
+            abrir = camara;
+        } else {
+            abrir = Intent.createChooser(galeria, "Foto del equipo");
+            if (camara != null) {
+                abrir.putExtra(Intent.EXTRA_INITIAL_INTENTS, new Intent[]{camara});
+            }
+        }
+        try {
+            startActivityForResult(abrir, ELIJO_FOTO);
+        } catch (ActivityNotFoundException e) {
+            contestarFoto(null);
+        }
+    }
+
+    private void contestarFoto(Uri[] fotos) {
+        if (fotos == null && fotoSacada != null) {
+            // Se canceló: no dejar una foto vacía en la galería.
+            try {
+                getContentResolver().delete(fotoSacada, null, null);
+            } catch (RuntimeException ignorado) { }
+        }
+        fotoSacada = null;
+        if (fotoPendiente != null) {
+            fotoPendiente.onReceiveValue(fotos);
+            fotoPendiente = null;
+        }
+        fotoParams = null;
+    }
+
+    @Override
+    protected void onActivityResult(int codigo, int resultado, Intent datos) {
+        super.onActivityResult(codigo, resultado, datos);
+        if (codigo != ELIJO_FOTO) {
+            return;
+        }
+        Uri[] fotos = null;
+        if (resultado == RESULT_OK) {
+            if (datos != null && datos.getData() != null) {
+                fotos = WebChromeClient.FileChooserParams.parseResult(resultado, datos);
+                if (fotoSacada != null) {
+                    // Eligió de la galería: la foto vacía de la cámara sobra.
+                    try {
+                        getContentResolver().delete(fotoSacada, null, null);
+                    } catch (RuntimeException ignorado) { }
+                    fotoSacada = null;
+                }
+            } else if (fotoSacada != null) {
+                fotos = new Uri[]{fotoSacada};
+                fotoSacada = null;
+            }
+        }
+        contestarFoto(fotos);
+    }
+
     @Override
     public void onRequestPermissionsResult(int codigo, String[] permisos,
                                            int[] resultados) {
         super.onRequestPermissionsResult(codigo, permisos, resultados);
+        if (codigo == PIDO_CAMARA_FOTO) {
+            // Sin cámara igual se puede elegir de la galería.
+            elegirFoto(resultados.length > 0
+                    && resultados[0] == PackageManager.PERMISSION_GRANTED);
+            return;
+        }
         if (codigo == PIDO_UBICACION) {
             // Concedida o no, se sigue con las notificaciones: negar la
             // ubicación no tiene por qué dejar al cadete sin avisos.
