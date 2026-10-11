@@ -8,6 +8,10 @@ import android.app.Service;
 import android.content.Context;
 import android.content.Intent;
 import android.content.pm.PackageManager;
+import android.hardware.Sensor;
+import android.hardware.SensorManager;
+import android.hardware.TriggerEvent;
+import android.hardware.TriggerEventListener;
 import android.location.Location;
 import android.location.LocationListener;
 import android.location.LocationManager;
@@ -76,6 +80,48 @@ public class UbicacionService extends Service {
      *  tener red. */
     private static final int MAX_PENDIENTES = 600;
 
+    /*
+     * GPS APAGADO MIENTRAS EL TELÉFONO ESTÁ QUIETO (2026-10-10). Federico
+     * amanecía con el teléfono muerto: el GPS pedía un punto cada 10 s las 24
+     * horas, también de noche en la mesa de luz. Ahora, a los 5 minutos sin
+     * moverse más de 40 m -- o sin un solo punto de GPS, que adentro de un local
+     * es el peor gasto: el GPS buscando sin encontrar --, se apaga el GPS y queda
+     * armado el sensor de MOVIMIENTO SIGNIFICATIVO, que es de muy bajo consumo y
+     * despierta al teléfono cuando arranca a caminar o a andar en auto. Ahí
+     * vuelve el GPS. Así las horas extras se siguen registrando (se mueve) y la
+     * noche no gasta nada (no se mueve).
+     *
+     * El mapa del centro de mando no pierde nada: muestra el último punto, que
+     * es justamente donde está. Un teléfono sin ese sensor sigue como antes.
+     */
+    private static final long QUIETO_MS = 5 * 60_000L;
+    private static final float RADIO_QUIETO_M = 40f;
+    /** Quieto y sin puntos nuevos, la tanda (que lleva la salud) sale cada 5
+     *  minutos y no cada 1: despertar la radio también gasta. */
+    private static final long LATIDO_QUIETO_MS = 5 * 60_000L;
+
+    private SensorManager sensores;
+    private Sensor movimiento;
+    private boolean quieto = false;
+    /** Donde empezó la quietud actual y desde cuándo (hora del teléfono). */
+    private Location ancla;
+    private long anclaDesdeMs;
+    private long ultimoFixMs;
+    private long gpsDesdeMs;
+    private long ultimoEnvioMs;
+    private final TriggerEventListener alMoverse = new TriggerEventListener() {
+        @Override
+        public void onTrigger(TriggerEvent evento) {
+            // El sensor es de un solo disparo: se desarma solo al avisar.
+            reloj.post(new Runnable() {
+                @Override
+                public void run() {
+                    despertar();
+                }
+            });
+        }
+    };
+
     /** Cuándo se anotó el último punto de GPS (hora del teléfono), o 0. Lo
      *  muestra la sección de Salud: es la prueba de que todo lo demás anda. */
     static volatile long ultimoPuntoMs = 0L;
@@ -89,7 +135,15 @@ public class UbicacionService extends Service {
     private final Runnable cadaMinuto = new Runnable() {
         @Override
         public void run() {
-            enviarTanda();
+            revisarQuietud();
+            boolean sinNada;
+            synchronized (pendientes) {
+                sinNada = pendientes.isEmpty();
+            }
+            if (!(quieto && sinNada
+                    && System.currentTimeMillis() - ultimoEnvioMs < LATIDO_QUIETO_MS)) {
+                enviarTanda();
+            }
             reloj.postDelayed(this, ENVIO_MS);
         }
     };
@@ -160,8 +214,54 @@ public class UbicacionService extends Service {
         // el filtro por precisión del mapa los caza. Adentro de un local el
         // GPS no engancha y no llega nada: el mapa muestra el último punto
         // bueno con su antigüedad, que es la verdad.
+        sensores = (SensorManager) getSystemService(Context.SENSOR_SERVICE);
+        movimiento = sensores == null ? null
+                : sensores.getDefaultSensor(Sensor.TYPE_SIGNIFICANT_MOTION);
+        gpsDesdeMs = System.currentTimeMillis();
         pedirA(LocationManager.GPS_PROVIDER);
         reloj.postDelayed(cadaMinuto, ENVIO_MS);
+    }
+
+    /** Cada minuto: ¿hace 5 que no se mueve, o que el GPS no encuentra nada? */
+    private void revisarQuietud() {
+        if (quieto || movimiento == null) {
+            return;
+        }
+        long ahora = System.currentTimeMillis();
+        boolean sinMoverse = ancla != null && ahora - anclaDesdeMs >= QUIETO_MS;
+        boolean sinSenal = ahora - Math.max(ultimoFixMs, gpsDesdeMs) >= QUIETO_MS;
+        if (sinMoverse || sinSenal) {
+            dormir();
+        }
+    }
+
+    private void dormir() {
+        try {
+            if (!sensores.requestTriggerSensor(alMoverse, movimiento)) {
+                return;  // no se pudo armar: mejor seguir con el GPS prendido
+            }
+        } catch (RuntimeException e) {
+            Log.w(TAG, "no se pudo armar el sensor de movimiento", e);
+            return;
+        }
+        quieto = true;
+        try {
+            gestor.removeUpdates(oyente);
+        } catch (SecurityException e) {
+            Log.w(TAG, "no se pudo soltar el GPS", e);
+        }
+        Log.i(TAG, "quieto: GPS apagado hasta que se mueva");
+    }
+
+    private void despertar() {
+        if (!quieto) {
+            return;
+        }
+        quieto = false;
+        ancla = null;
+        gpsDesdeMs = System.currentTimeMillis();
+        pedirA(LocationManager.GPS_PROVIDER);
+        Log.i(TAG, "en movimiento: GPS prendido");
     }
 
     private void pedirA(String proveedor) {
@@ -181,6 +281,12 @@ public class UbicacionService extends Service {
             return;  // sólo GPS: ver el comentario de pedirA en onCreate
         }
         ultimoPuntoMs = punto.getTime();
+        long ahora = System.currentTimeMillis();
+        ultimoFixMs = ahora;
+        if (ancla == null || punto.distanceTo(ancla) > RADIO_QUIETO_M) {
+            ancla = punto;
+            anclaDesdeMs = ahora;
+        }
         try {
             JSONObject p = new JSONObject();
             p.put("lat", punto.getLatitude());
@@ -228,6 +334,7 @@ public class UbicacionService extends Service {
             saludLeida = "{}";
         }
         final String salud = saludLeida;
+        ultimoEnvioMs = System.currentTimeMillis();
         new Thread(new Runnable() {
             @Override
             public void run() {
@@ -311,6 +418,9 @@ public class UbicacionService extends Service {
     @Override
     public void onDestroy() {
         reloj.removeCallbacks(cadaMinuto);
+        if (sensores != null && movimiento != null) {
+            sensores.cancelTriggerSensor(alMoverse, movimiento);
+        }
         if (gestor != null && oyente != null) {
             try {
                 gestor.removeUpdates(oyente);
