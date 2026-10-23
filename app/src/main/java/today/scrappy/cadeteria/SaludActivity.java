@@ -14,8 +14,11 @@ import android.widget.ScrollView;
 import android.widget.TextView;
 
 /**
- * La sección de Salud: qué está bien y qué no en el teléfono, con un botón que
- * lleva al ajuste exacto para arreglar cada cosa.
+ * La sección de Salud: qué está bien y qué no en el teléfono, con un botón para
+ * arreglar cada cosa. Los permisos se piden con el cartel "Permitir" de Android
+ * sin salir de la app ({@link Permisos}); lo demás (GPS, ahorro de batería,
+ * instalar actualizaciones) Android sólo lo deja cambiar en sus ajustes, y el
+ * botón lleva a la pantalla exacta.
  *
  * <p>Nativa y no una página de Django a propósito: lo que revisa (permisos,
  * GPS, ahorro de batería) sólo lo sabe el teléfono, y tiene que abrir aunque no
@@ -34,6 +37,11 @@ public class SaludActivity extends Activity {
     private static final int FONDO = 0xFFF3F5F9;
 
     private LinearLayout lista;
+
+    /** Código de {@code requestPermissions} = 100 + posición del ítem. */
+    private static final int PIDO_DESDE = 100;
+    /** Los ítems tal como se pintaron, para saber qué ítem contestó Android. */
+    private java.util.List<Salud.Item> pintados = new java.util.ArrayList<>();
 
     @Override
     protected void onCreate(Bundle guardado) {
@@ -72,7 +80,10 @@ public class SaludActivity extends Activity {
 
     private void pintar() {
         lista.removeAllViews();
-        for (final Salud.Item item : Salud.revisar(this)) {
+        pintados = Salud.revisar(this);
+        for (int i = 0; i < pintados.size(); i++) {
+            final Salud.Item item = pintados.get(i);
+            final int codigo = PIDO_DESDE + i;
             LinearLayout fila = new LinearLayout(this);
             fila.setOrientation(LinearLayout.VERTICAL);
             fila.setPadding(dp(14), dp(12), dp(14), dp(12));
@@ -91,7 +102,7 @@ public class SaludActivity extends Activity {
             detalle.setPadding(0, dp(3), 0, 0);
             fila.addView(detalle);
 
-            if (!item.ok && item.arreglar != null) {
+            if (!item.ok && (item.arreglar != null || item.permisos != null)) {
                 Button arreglar = new Button(this);
                 arreglar.setText("Arreglar");
                 arreglar.setAllCaps(false);
@@ -103,18 +114,12 @@ public class SaludActivity extends Activity {
                 arreglar.setOnClickListener(new View.OnClickListener() {
                     @Override
                     public void onClick(View v) {
-                        try {
-                            startActivity(item.arreglar);
-                        } catch (Exception e) {
-                            // Un fabricante sin esa pantalla: al menos los
-                            // ajustes de la app, donde está casi todo.
-                            try {
-                                startActivity(new android.content.Intent(
-                                        android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
-                                        android.net.Uri.parse("package:" + getPackageName())));
-                            } catch (Exception ignorada) {
-                                // Nada más que hacer.
-                            }
+                        if (item.permisos != null) {
+                            Permisos.pedir(SaludActivity.this, item.permisos, codigo);
+                        } else {
+                            // Un fabricante sin esa pantalla cae a los ajustes
+                            // de la app, donde está casi todo.
+                            Permisos.abrir(SaludActivity.this, item.arreglar);
                         }
                     }
                 });
@@ -129,6 +134,23 @@ public class SaludActivity extends Activity {
         version.setGravity(Gravity.CENTER_HORIZONTAL);
         version.setPadding(0, dp(8), 0, 0);
         lista.addView(version);
+    }
+
+    @Override
+    public void onRequestPermissionsResult(int codigo, String[] permisos,
+                                           int[] resultados) {
+        super.onRequestPermissionsResult(codigo, permisos, resultados);
+        int i = codigo - PIDO_DESDE;
+        Salud.Item item = i >= 0 && i < pintados.size() ? pintados.get(i) : null;
+        boolean sinCartel = Permisos.sinCartel(this, codigo, permisos, resultados);
+        if (Permisos.algunoConcedido(resultados)) {
+            // Con la ubicación recién dada el seguimiento arranca ya, sin
+            // esperar a que se vuelva a la pantalla principal.
+            UbicacionService.arrancar(this);
+        } else if (item != null && sinCartel) {
+            Permisos.ofrecerAjustes(this, item.que, item.arreglar);
+        }
+        pintar();
     }
 
     private TextView texto(String s, float sp, int color, boolean negrita) {

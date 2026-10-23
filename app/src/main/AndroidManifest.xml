@@ -14,6 +14,15 @@
     <uses-permission android:name="android.permission.CAMERA" />
     <uses-feature android:name="android.hardware.camera" android:required="false" />
 
+    <!-- MICROFONO: las notas de voz del reporte de errores (el widget de
+         feedback, `getUserMedia({audio})`). Se pide cuando se toca Grabar, no al
+         instalar. MODIFY_AUDIO_SETTINGS no muestra nada (es de instalacion):
+         el audio del WebView (Chromium) lo usa para abrir el microfono, y sin
+         el la grabacion puede salir muda. -->
+    <uses-permission android:name="android.permission.RECORD_AUDIO" />
+    <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS" />
+    <uses-feature android:name="android.hardware.microphone" android:required="false" />
+
     <!-- INSTALAR: la app baja el APK y abre el instalador ella misma. Antes abria
          la descarga en Chrome, y Chrome DESCARTA los .apk (su analisis de
          seguridad los bloquea): la barra se llenaba al instante y el archivo

@@ -26,6 +26,7 @@ import android.webkit.WebViewClient;
 import android.widget.LinearLayout;
 import android.widget.TextView;
 
+import java.util.ArrayList;
 import java.util.List;
 
 /**
@@ -37,7 +38,8 @@ import java.util.List;
  * y avisar cuando hay una versión nueva.
  *
  * <p>Permisos sensibles: la CÁMARA, para escanear la etiqueta del equipo al
- * cerrar un evento (se pide cuando la pantalla la usa, no al instalar), y la
+ * cerrar un evento, el MICRÓFONO, para las notas de voz del reporte de errores
+ * (los dos se piden cuando la pantalla los usa, no al instalar), y la
  * UBICACIÓN, para el mapa del centro de mando ({@link UbicacionService}, el
  * mismo seguimiento que vendedoresApp). La ubicación se pide al abrir,
  * encadenada con las notificaciones: ubicación → notificaciones → segundo
@@ -51,7 +53,7 @@ public class MainActivity extends Activity {
     private static final int AZUL = 0xFF242F62;
 
     /** Código propio para la respuesta de {@link #onRequestPermissionsResult}. */
-    private static final int PIDO_CAMARA = 1;
+    private static final int PIDO_PAGINA = 1;   // cámara y/o micrófono de `getUserMedia`
     private static final int PIDO_AVISOS = 2;
     private static final int PIDO_UBICACION = 3;
     private static final int PIDO_SEGUNDO_PLANO = 4;
@@ -93,11 +95,15 @@ public class MainActivity extends Activity {
      * El pedido de la página que quedó esperando a que Android conteste.
      *
      * <p>Son DOS permisos distintos y hay que atravesar los dos: el del sistema
-     * (Android le pregunta al usuario por la cámara) y el del WebView (la página
-     * pide `getUserMedia`). Si se contesta el del WebView sin tener el del
-     * sistema, la cámara falla igual y sin explicación.
+     * (Android le pregunta al usuario por la cámara o el micrófono) y el del
+     * WebView (la página pide `getUserMedia`). Si se contesta el del WebView sin
+     * tener el del sistema, falla igual y sin explicación. Hasta la 0.9 el
+     * micrófono se rechazaba siempre: por eso las notas de voz del reporte de
+     * errores no grababan (reportado por Federico 2026-10-23).
      */
-    private PermissionRequest camaraPendiente;
+    private PermissionRequest pedidoDeLaPagina;
+    /** Los recursos de {@link #pedidoDeLaPagina} que la app está dispuesta a dar. */
+    private String[] recursosPedidos;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -156,33 +162,40 @@ public class MainActivity extends Activity {
         CookieManager.getInstance().setAcceptCookie(true);
         CookieManager.getInstance().setAcceptThirdPartyCookies(web, false);
 
-        // La cámara del escáner de series. `WebChromeClient` es el único lugar
-        // donde el WebView pregunta esto: sin esta clase puesta, un
-        // `getUserMedia` se rechaza en silencio y la página no puede distinguir
-        // "el usuario dijo que no" de "esta app nunca lo va a permitir".
+        // La cámara del escáner de series y el micrófono de las notas de voz.
+        // `WebChromeClient` es el único lugar donde el WebView pregunta esto:
+        // sin esta clase puesta, un `getUserMedia` se rechaza en silencio y la
+        // página no puede distinguir "el usuario dijo que no" de "esta app
+        // nunca lo va a permitir".
         web.setWebChromeClient(new WebChromeClient() {
             @Override
             public void onPermissionRequest(final PermissionRequest pedido) {
-                if (!quiereLaCamara(pedido)) {
-                    // Micrófono y todo lo demás se rechaza. La app no tiene por
-                    // qué poder escuchar, y conceder de más es exactamente lo
+                String[] recursos = recursosQueSeDan(pedido);
+                if (recursos.length == 0 || !esNuestra(pedido.getOrigin())) {
+                    // Cualquier otro recurso, o una página que no es la
+                    // nuestra, se rechaza: conceder de más es exactamente lo
                     // que hace que un permiso deje de significar algo.
                     pedido.deny();
                     return;
                 }
-                if (checkSelfPermission(Manifest.permission.CAMERA)
-                        == PackageManager.PERMISSION_GRANTED) {
-                    concederCamara(pedido);
+                String[] faltan = permisosQueFaltan(recursos);
+                if (faltan.length == 0) {
+                    pedido.grant(recursos);
                     return;
                 }
-                camaraPendiente = pedido;
-                requestPermissions(new String[]{Manifest.permission.CAMERA},
-                        PIDO_CAMARA);
+                if (pedidoDeLaPagina != null) {
+                    // Uno anterior sin contestar: que la página no quede colgada.
+                    pedidoDeLaPagina.deny();
+                }
+                pedidoDeLaPagina = pedido;
+                recursosPedidos = recursos;
+                Permisos.pedir(MainActivity.this, faltan, PIDO_PAGINA);
             }
 
             @Override
             public void onPermissionRequestCanceled(PermissionRequest pedido) {
-                camaraPendiente = null;
+                pedidoDeLaPagina = null;
+                recursosPedidos = null;
             }
 
             @Override
@@ -361,28 +374,55 @@ public class MainActivity extends Activity {
         }
     }
 
-    /** Si el pedido de la página incluye vídeo. El audio no se concede nunca. */
-    private static boolean quiereLaCamara(PermissionRequest pedido) {
+    /**
+     * De lo que pidió la página, lo que la app da: cámara y micrófono. Nunca
+     * se concede la lista tal como vino (`grant(pedido.getResources())`): eso
+     * daría también cualquier recurso nuevo que el WebView agregue mañana.
+     */
+    private static String[] recursosQueSeDan(PermissionRequest pedido) {
+        List<String> dar = new ArrayList<>();
         String[] recursos = pedido.getResources();
-        if (recursos == null) {
-            return false;
-        }
-        for (String recurso : recursos) {
-            if (PermissionRequest.RESOURCE_VIDEO_CAPTURE.equals(recurso)) {
-                return true;
+        if (recursos != null) {
+            for (String recurso : recursos) {
+                if (permisoDe(recurso) != null && !dar.contains(recurso)) {
+                    dar.add(recurso);
+                }
             }
         }
-        return false;
+        return dar.toArray(new String[0]);
+    }
+
+    /** El permiso de Android detrás de cada recurso del WebView. */
+    private static String permisoDe(String recurso) {
+        if (PermissionRequest.RESOURCE_VIDEO_CAPTURE.equals(recurso)) {
+            return Manifest.permission.CAMERA;
+        }
+        if (PermissionRequest.RESOURCE_AUDIO_CAPTURE.equals(recurso)) {
+            return Manifest.permission.RECORD_AUDIO;
+        }
+        return null;
+    }
+
+    private String[] permisosQueFaltan(String[] recursos) {
+        List<String> faltan = new ArrayList<>();
+        for (String recurso : recursos) {
+            String permiso = permisoDe(recurso);
+            if (checkSelfPermission(permiso) != PackageManager.PERMISSION_GRANTED) {
+                faltan.add(permiso);
+            }
+        }
+        return faltan.toArray(new String[0]);
     }
 
     /**
-     * Concede SÓLO el vídeo, aunque la página haya pedido más.
-     *
-     * <p>`grant()` con la lista que vino del pedido concedería también el
-     * micrófono si la página lo hubiera incluido.
+     * Si el pedido viene de nuestro sitio. Se compara esquema y host, no un
+     * prefijo: "https://back.scrappy.today.otro.com" empieza igual.
      */
-    private static void concederCamara(PermissionRequest pedido) {
-        pedido.grant(new String[]{PermissionRequest.RESOURCE_VIDEO_CAPTURE});
+    private static boolean esNuestra(Uri origen) {
+        Uri nuestro = Uri.parse(BuildConfig.BASE_URL);
+        return origen != null && nuestro.getHost() != null
+                && nuestro.getHost().equalsIgnoreCase(origen.getHost())
+                && nuestro.getScheme().equalsIgnoreCase(origen.getScheme());
     }
 
     /**
@@ -498,23 +538,44 @@ public class MainActivity extends Activity {
             UbicacionService.arrancar(this);
             return;
         }
-        if (codigo != PIDO_CAMARA) {
+        if (codigo != PIDO_PAGINA) {
             return;
         }
-        PermissionRequest pedido = camaraPendiente;
-        camaraPendiente = null;
-        if (pedido == null) {
+        boolean sinCartel = Permisos.sinCartel(this, codigo, permisos, resultados);
+        PermissionRequest pedido = pedidoDeLaPagina;
+        String[] recursos = recursosPedidos;
+        pedidoDeLaPagina = null;
+        recursosPedidos = null;
+        if (pedido == null || recursos == null) {
             return;
         }
-        boolean concedido = resultados.length > 0
-                && resultados[0] == PackageManager.PERMISSION_GRANTED;
-        if (concedido) {
-            concederCamara(pedido);
-        } else {
-            // Se contesta que NO en vez de dejarlo colgado: la página tiene un
-            // camino para cuando no hay cámara (tipear la serie), y sólo lo toma
-            // si `getUserMedia` falla.
-            pedido.deny();
+        List<String> dar = new ArrayList<>();
+        for (String recurso : recursos) {
+            if (checkSelfPermission(permisoDe(recurso)) == PackageManager.PERMISSION_GRANTED) {
+                dar.add(recurso);
+            }
+        }
+        if (!dar.isEmpty()) {
+            pedido.grant(dar.toArray(new String[0]));
+            return;
+        }
+        // Se contesta que NO en vez de dejarlo colgado: la página tiene un
+        // camino para cuando no hay cámara (tipear la serie) o micrófono (el
+        // texto), y sólo lo toma si `getUserMedia` falla.
+        pedido.deny();
+        if (sinCartel) {
+            // Android ya no pregunta (dos "No" seguidos): sin esto la persona
+            // toca el botón, no pasa nada, y no sabe que se arregla en ajustes.
+            // Es seguro mostrarlo: la cámara y el micrófono los pide la página
+            // sólo cuando la persona toca Escanear o Grabar.
+            boolean audio = false;
+            boolean video = false;
+            for (String recurso : recursos) {
+                audio |= PermissionRequest.RESOURCE_AUDIO_CAPTURE.equals(recurso);
+                video |= PermissionRequest.RESOURCE_VIDEO_CAPTURE.equals(recurso);
+            }
+            Permisos.ofrecerAjustes(this, audio && video ? "la cámara y el micrófono"
+                    : audio ? "el micrófono" : "la cámara", Permisos.ajustesDeLaApp(this));
         }
     }
 

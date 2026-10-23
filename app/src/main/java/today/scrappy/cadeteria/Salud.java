@@ -45,16 +45,32 @@ final class Salud {
         final String detalle;
         /** Crítico = sin esto la ubicación no llega al centro de mando. */
         final boolean critico;
+        /** Adónde ir si Android ya no deja preguntar (o no es un permiso). */
         final Intent arreglar;
+        /**
+         * Los permisos que se piden con el cartel "Permitir" sin salir de la app
+         * (ver {@link Permisos}), o {@code null} si no es un permiso que Android
+         * deje pedir así: GPS, ahorro de batería, instalar actualizaciones.
+         */
+        final String[] permisos;
+        /** "la cámara", "el micrófono": para el cartel de {@link Permisos}. */
+        final String que;
 
         Item(String clave, String titulo, boolean ok, String detalle,
              boolean critico, Intent arreglar) {
+            this(clave, titulo, ok, detalle, critico, arreglar, null, null);
+        }
+
+        Item(String clave, String titulo, boolean ok, String detalle,
+             boolean critico, Intent arreglar, String[] permisos, String que) {
             this.clave = clave;
             this.titulo = titulo;
             this.ok = ok;
             this.detalle = detalle;
             this.critico = critico;
             this.arreglar = arreglar;
+            this.permisos = permisos;
+            this.que = que;
         }
     }
 
@@ -65,21 +81,31 @@ final class Salud {
         Intent ajustesApp = new Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
                 Uri.parse("package:" + c.getPackageName()));
 
+        String[] primerPlano = {Manifest.permission.ACCESS_FINE_LOCATION,
+                Manifest.permission.ACCESS_COARSE_LOCATION};
         boolean ubicacion = concedido(c, Manifest.permission.ACCESS_FINE_LOCATION);
         items.add(new Item("ubicacion", "Permiso de ubicación precisa", ubicacion,
                 ubicacion ? "Concedido."
-                        : "Sin esto la app no sabe dónde estás. En Permisos → Ubicación, "
-                          + "elegí \"Permitir todo el tiempo\" y \"Ubicación precisa\".",
-                true, ajustesApp));
+                        : "Sin esto la app no sabe dónde estás. Tocá Arreglar y elegí "
+                          + "\"Mientras la app está en uso\" con \"Ubicación precisa\" "
+                          + "prendida.",
+                true, ajustesApp, primerPlano, "la ubicación"));
 
         boolean segundoPlano = Build.VERSION.SDK_INT < Build.VERSION_CODES.Q
                 || concedido(c, Manifest.permission.ACCESS_BACKGROUND_LOCATION);
+        // Sin la de primer plano Android ignora el pedido de "todo el tiempo":
+        // se pide primero esa, y la segunda vez que toca Arreglar, ésta. Desde
+        // Android 11 "todo el tiempo" no tiene cartel: el propio pedido abre la
+        // pantalla de ubicación de la app, y la flecha de atrás vuelve acá.
+        String[] todoElTiempo = Build.VERSION.SDK_INT < Build.VERSION_CODES.Q ? null
+                : ubicacion ? new String[]{Manifest.permission.ACCESS_BACKGROUND_LOCATION}
+                : primerPlano;
         items.add(new Item("segundo_plano", "Ubicación \"todo el tiempo\"", segundoPlano,
                 segundoPlano ? "Concedido."
                         : "Con \"mientras se usa la app\" la ubicación se corta cuando "
-                          + "bloqueás el teléfono. En Permisos → Ubicación, elegí "
-                          + "\"Permitir todo el tiempo\".",
-                true, ajustesApp));
+                          + "bloqueás el teléfono. Tocá Arreglar, elegí \"Permitir todo "
+                          + "el tiempo\" y volvé con la flecha de atrás.",
+                true, ajustesApp, todoElTiempo, "la ubicación todo el tiempo"));
 
         LocationManager lm = (LocationManager) c.getSystemService(Context.LOCATION_SERVICE);
         boolean gps = lm != null
@@ -113,17 +139,30 @@ final class Salud {
         boolean avisos = nm == null || nm.areNotificationsEnabled();
         Intent ajustesAvisos = new Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS)
                 .putExtra(Settings.EXTRA_APP_PACKAGE, c.getPackageName());
+        // Desde Android 13 son un permiso con cartel; antes (o si se apagaron a
+        // mano en los ajustes, con el permiso dado) sólo se prenden desde ahí.
+        String[] permisoAvisos = Build.VERSION.SDK_INT >= 33
+                && !concedido(c, Manifest.permission.POST_NOTIFICATIONS)
+                ? new String[]{Manifest.permission.POST_NOTIFICATIONS} : null;
         items.add(new Item("notificaciones", "Notificaciones", avisos,
                 avisos ? "Activadas."
                         : "Sin notificaciones no te enterás cuando administración "
                           + "contesta un pedido.",
-                false, ajustesAvisos));
+                false, ajustesAvisos, permisoAvisos, "las notificaciones"));
 
         boolean camara = concedido(c, Manifest.permission.CAMERA);
         items.add(new Item("camara", "Cámara", camara,
                 camara ? "Concedida."
                         : "Todavía no. Se pide la primera vez que escaneás una serie.",
-                false, ajustesApp));
+                false, ajustesApp, new String[]{Manifest.permission.CAMERA}, "la cámara"));
+
+        boolean micro = concedido(c, Manifest.permission.RECORD_AUDIO);
+        items.add(new Item("microfono", "Micrófono", micro,
+                micro ? "Concedido."
+                        : "Todavía no. Se pide la primera vez que grabás una nota de voz "
+                          + "en un reporte de error.",
+                false, ajustesApp, new String[]{Manifest.permission.RECORD_AUDIO},
+                "el micrófono"));
 
         boolean instalar = Build.VERSION.SDK_INT < Build.VERSION_CODES.O
                 || c.getPackageManager().canRequestPackageInstalls();
