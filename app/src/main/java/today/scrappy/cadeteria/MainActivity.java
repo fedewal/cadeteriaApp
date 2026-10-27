@@ -12,6 +12,7 @@ import android.content.pm.PackageManager;
 import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
+import android.os.ParcelFileDescriptor;
 import android.provider.MediaStore;
 import android.provider.Settings;
 import android.util.TypedValue;
@@ -73,8 +74,14 @@ public class MainActivity extends Activity {
     private WebChromeClient.FileChooserParams fotoParams;
     /** El input pide video (`accept="video/*"`): se graba o se elige y se achica. */
     private boolean esVideo;
-    /** Dónde escribe la cámara la foto que se está sacando. */
+    /**
+     * Dónde escribe la cámara la foto que se está sacando o el video que se
+     * está grabando. Viaja en el estado de la actividad ({@link #SACADA}): si
+     * Android mata la app con la cámara abierta, al volver hay que saber qué
+     * entrada se le dio para no dejarla vacía en la galería.
+     */
     private Uri fotoSacada;
+    private static final String SACADA = "cadeteria.fotoSacada";
 
     /**
      * Con qué URL abrir, en vez del día. La pone la notificación de una
@@ -114,6 +121,9 @@ public class MainActivity extends Activity {
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
+        if (savedInstanceState != null && savedInstanceState.getString(SACADA) != null) {
+            fotoSacada = Uri.parse(savedInstanceState.getString(SACADA));
+        }
 
         // La barra de estado en el azul de la cabecera (`--azul` de las
         // plantillas). Sin esto queda en el gris del tema de Android: una banda
@@ -211,6 +221,11 @@ public class MainActivity extends Activity {
                     // Un pedido anterior sin contestar deja el input trabado.
                     fotoPendiente.onReceiveValue(null);
                 }
+                // Una entrada de la galería de un pedido que nunca volvió (la
+                // app murió con la cámara abierta) no es de este: si quedara
+                // puesta, un video elegido de la galería perdería contra lo que
+                // la cámara grabó aquella vez. Queda en la galería, sin tocar.
+                fotoSacada = null;
                 fotoPendiente = callback;
                 fotoParams = params;
                 esVideo = pideVideo(params);
@@ -455,10 +470,14 @@ public class MainActivity extends Activity {
 
     /**
      * Graba con la cámara (si la página pidió `capture`) o elige de los videos
-     * del teléfono. A diferencia de la foto no se le pasa `EXTRA_OUTPUT`: la
-     * cámara guarda el video donde siempre y lo devuelve en `getData()`, con
-     * permiso de lectura para nosotros (así lo hace la cámara de referencia de
-     * Android). El video grabado queda en la galería del teléfono.
+     * del teléfono.
+     *
+     * <p>Como la foto, la cámara graba en una entrada de la galería que crea la
+     * app (`EXTRA_OUTPUT`): el archivo es NUESTRO y se lee sin permisos de
+     * almacenamiento. Si la cámara guardara donde siempre y devolviera su Uri,
+     * leerla dependería de que nos preste el permiso; si no lo presta, fallan
+     * el achicado y la subida, sin aviso. En 8 y 9 (sin `RELATIVE_PATH`) queda
+     * lo que devuelva la cámara. El video grabado queda en la galería.
      */
     private void elegirVideo(boolean hayCamara) {
         Intent abrir;
@@ -467,6 +486,25 @@ public class MainActivity extends Activity {
             // cámara lo ignora, AchicarVideo rechaza lo que dure de más.
             abrir = new Intent(MediaStore.ACTION_VIDEO_CAPTURE)
                     .putExtra(MediaStore.EXTRA_DURATION_LIMIT, 60);
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                ContentValues datos = new ContentValues();
+                datos.put(MediaStore.Video.Media.DISPLAY_NAME,
+                        "cadeteria_" + System.currentTimeMillis() + ".mp4");
+                datos.put(MediaStore.Video.Media.MIME_TYPE, "video/mp4");
+                datos.put(MediaStore.Video.Media.RELATIVE_PATH, "Movies/Cadeteria");
+                try {
+                    fotoSacada = getContentResolver().insert(
+                            MediaStore.Video.Media.EXTERNAL_CONTENT_URI, datos);
+                } catch (RuntimeException e) {
+                    fotoSacada = null;
+                }
+                if (fotoSacada != null) {
+                    // También lectura: la cámara de AOSP abre el archivo en "rw".
+                    abrir.putExtra(MediaStore.EXTRA_OUTPUT, fotoSacada)
+                            .addFlags(Intent.FLAG_GRANT_WRITE_URI_PERMISSION
+                                    | Intent.FLAG_GRANT_READ_URI_PERMISSION);
+                }
+            }
         } else {
             abrir = fotoParams != null ? fotoParams.createIntent()
                     : new Intent(Intent.ACTION_GET_CONTENT).setType("video/*");
@@ -543,12 +581,36 @@ public class MainActivity extends Activity {
     protected void onActivityResult(int codigo, int resultado, Intent datos) {
         super.onActivityResult(codigo, resultado, datos);
         if (codigo == ELIJO_VIDEO) {
-            Uri[] video = resultado == RESULT_OK ? elegidas(datos) : null;
-            if (video == null) {
-                contestarFoto(null);
-            } else {
-                achicar(video[0]);
+            Uri video = null;
+            if (resultado == RESULT_OK) {
+                if (fotoSacada != null && tieneAlgo(fotoSacada)) {
+                    video = fotoSacada;
+                } else {
+                    // La cámara ignoró `EXTRA_OUTPUT` y guardó en otro lado, o
+                    // se eligió de la galería: vale lo que devolvió.
+                    Uri[] devueltas = elegidas(datos);
+                    video = devueltas != null ? devueltas[0] : null;
+                }
             }
+            if (video != null && video.equals(fotoSacada)) {
+                // Es el video grabado: queda en la galería, no se borra.
+                fotoSacada = null;
+            }
+            if (video == null || fotoPendiente == null) {
+                // Cancelado o sin video; o Android mató la app mientras la
+                // cámara grababa, y la página que lo esperaba ya no está: no se
+                // achica para nadie. `contestarFoto` borra la entrada sin usar.
+                contestarFoto(null);
+                return;
+            }
+            if (fotoSacada != null) {
+                // Quedó vacía: la cámara guardó en otro lado.
+                try {
+                    getContentResolver().delete(fotoSacada, null, null);
+                } catch (RuntimeException ignorado) { }
+                fotoSacada = null;
+            }
+            achicar(video);
             return;
         }
         if (codigo != ELIJO_FOTO) {
@@ -572,6 +634,15 @@ public class MainActivity extends Activity {
             }
         }
         contestarFoto(fotos);
+    }
+
+    /** Si la cámara escribió en la entrada que se le dio (algunas la ignoran). */
+    private boolean tieneAlgo(Uri uri) {
+        try (ParcelFileDescriptor archivo = getContentResolver().openFileDescriptor(uri, "r")) {
+            return archivo != null && archivo.getStatSize() > 0;
+        } catch (Exception e) {
+            return false;
+        }
     }
 
     /**
@@ -810,6 +881,9 @@ public class MainActivity extends Activity {
     protected void onSaveInstanceState(Bundle estado) {
         super.onSaveInstanceState(estado);
         web.saveState(estado);
+        if (fotoSacada != null) {
+            estado.putString(SACADA, fotoSacada.toString());
+        }
     }
 
     @Override

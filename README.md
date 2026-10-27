@@ -74,16 +74,19 @@ visita.
     **todas** (`ClipData`); hasta la 0.10 llegaba la foto vacía de la cámara,
     por eso el servidor no le pone `multiple` a un APK viejo.
   - **Video**: con `capture`, la cámara con tope de 60 segundos
-    (`EXTRA_DURATION_LIMIT`); sin `capture`, los videos del teléfono. Si dura
-    más de 62 s se avisa y no se entrega nada. Si no, **`AchicarVideo` lo
-    achica antes de dárselo a la página**: 720 p de lado corto, H.264 a 2 Mb/s
-    y audio AAC (un minuto queda en unos 16 MB), con un cartel "Preparando el
-    video… NN %". Usa Media3 Transformer.
-  - Achicar no puede tirar la app: todo Media3 vive en `AchicarVideo`, que se
-    carga recién al elegir un video, y ante cualquier falla se entrega el video
-    original (la página lo frena si pasa de 28 MB). Por lo mismo el manifiesto
-    saca el `appComponentFactory` que trae androidx.core: el arranque de la app
-    es el mismo que sin Media3.
+    (`EXTRA_DURATION_LIMIT`), grabando en un archivo propio de la app
+    (`Movies/Cadeteria`, como la foto en `Pictures/Cadeteria`) para leerlo sin
+    depender de que la cámara preste el suyo; sin `capture`, los videos del
+    teléfono. Si dura más de 62 s se avisa y no se entrega nada. Si no,
+    **`AchicarVideo` lo achica antes de dárselo a la página**: 720 p de lado
+    corto, H.264 a 2 Mb/s y audio AAC (un minuto queda en unos 16 MB), con un
+    cartel "Preparando el video… NN %". Usa Media3 Transformer.
+  - Achicar no puede tirar la app ni dejarla trabada: todo Media3 vive en
+    `AchicarVideo`, que se carga recién al elegir un video, y ante cualquier
+    falla, o si tarda más de 2 minutos, se entrega el video original (la página
+    lo frena si pasa de 28 MB). Por lo mismo el manifiesto saca el
+    `appComponentFactory` que trae androidx.core: el arranque de la app es el
+    mismo que sin Media3.
 
 No hay ninguna credencial dentro del APK: la autenticación es la cookie de
 sesión del propio WebView. Eso es lo que permite que este repo sea público.

@@ -26,6 +26,7 @@ import androidx.media3.transformer.VideoEncoderSettings;
 import java.io.File;
 import java.util.Collections;
 import java.util.Locale;
+import java.util.concurrent.TimeoutException;
 
 /**
  * Achica en el teléfono el video que se grabó o se eligió, antes de dárselo a
@@ -36,11 +37,11 @@ import java.util.Locale;
  * justo lo que no queremos. A 720 p de lado corto y 2 Mb/s, un minuto queda
  * en unos 15 MB más el audio, debajo de los 20 MB que pide el diseño.
  *
- * <p>Que la exportación no se cuelgue lo cuida Transformer: si en 10 s no
- * escribe nada, corta con error (y entonces va el original). Por eso el
- * diálogo puede no tener "Cancelar" sin dejar al cadete encerrado. Lo único
- * que puede tardar sin ese freno es leer la duración de un video que está en
- * la nube (Drive, Fotos): espera a que se baje, con el diálogo puesto.
+ * <p>El cartel no tiene "Cancelar", así que nada puede dejar al cadete
+ * encerrado: la exportación la corta Transformer si en 10 s no escribe nada,
+ * y todo el trámite tiene un tope de {@link #TIEMPO_MAXIMO_MS} (leer la
+ * duración de un video que está en la nube espera a que se baje entero, y ahí
+ * Transformer no mira). Las dos salidas entregan el original.
  *
  * <p><b>Todo lo de Media3 vive acá, y sólo acá.</b> La actualización es
  * obligatoria y salió para todos sin probarse antes en un teléfono: si algo de
@@ -75,6 +76,8 @@ final class AchicarVideo {
     private static final int LADO_CORTO = 720;
     private static final int BITRATE = 2_000_000;
     private static final long CADA_MS = 500;
+    /** Un minuto de video se achica en bastante menos; esto es solo la salida de emergencia. */
+    private static final long TIEMPO_MAXIMO_MS = 120_000;
 
     private final Activity actividad;
     private final Uri origen;
@@ -105,6 +108,13 @@ final class AchicarVideo {
         }
     };
 
+    private final Runnable sePasoDelTiempo = new Runnable() {
+        @Override
+        public void run() {
+            fallo(new TimeoutException("más de " + TIEMPO_MAXIMO_MS / 1000 + " s"));
+        }
+    };
+
     private AchicarVideo(Activity actividad, Uri origen, Listo listo) {
         this.actividad = actividad;
         this.origen = origen;
@@ -118,6 +128,7 @@ final class AchicarVideo {
 
     private void empezar() {
         try {
+            principal.postDelayed(sePasoDelTiempo, TIEMPO_MAXIMO_MS);
             // No se puede cancelar: la página está esperando el archivo y,
             // para un minuto de video, la espera es corta (ver arriba).
             dialogo = new AlertDialog.Builder(actividad)
@@ -263,6 +274,7 @@ final class AchicarVideo {
         }
         contestado = true;
         principal.removeCallbacks(mostrarAvance);
+        principal.removeCallbacks(sePasoDelTiempo);
         try {
             if (dialogo != null) {
                 dialogo.dismiss();
