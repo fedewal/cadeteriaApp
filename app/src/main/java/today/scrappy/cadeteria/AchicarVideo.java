@@ -26,7 +26,6 @@ import androidx.media3.transformer.VideoEncoderSettings;
 import java.io.File;
 import java.util.Collections;
 import java.util.Locale;
-import java.util.concurrent.TimeoutException;
 
 /**
  * Achica en el teléfono el video que se grabó o se eligió, antes de dárselo a
@@ -41,7 +40,8 @@ import java.util.concurrent.TimeoutException;
  * encerrado: la exportación la corta Transformer si en 10 s no escribe nada,
  * y todo el trámite tiene un tope de {@link #TIEMPO_MAXIMO_MS} (leer la
  * duración de un video que está en la nube espera a que se baje entero, y ahí
- * Transformer no mira). Las dos salidas entregan el original.
+ * Transformer no mira). Las dos salidas entregan el original, y el tope sin
+ * esperar a Transformer (ver {@link #sePasoDelTiempo}).
  *
  * <p><b>Todo lo de Media3 vive acá, y sólo acá.</b> La actualización es
  * obligatoria y salió para todos sin probarse antes en un teléfono: si algo de
@@ -108,10 +108,20 @@ final class AchicarVideo {
         }
     };
 
+    /**
+     * El tope contesta YA con el original, sin {@code cancel()}: en Media3
+     * 1.8.0 {@code cancel()} espera sin límite a que el hilo de Transformer
+     * procese el fin, y si el tope saltó es justamente porque ese hilo puede
+     * estar trabado (en el codificador, por ejemplo). Esperarlo en el hilo
+     * principal colgaría la app ("no responde") con el cartel puesto.
+     * Transformer termina o falla solo; su aviso tardío lo frena
+     * {@code contestado} y borra lo que dejó escrito.
+     */
     private final Runnable sePasoDelTiempo = new Runnable() {
         @Override
         public void run() {
-            fallo(new TimeoutException("más de " + TIEMPO_MAXIMO_MS / 1000 + " s"));
+            Log.w(TAG, "más de " + TIEMPO_MAXIMO_MS / 1000 + " s preparando el video, va el original");
+            terminar(origen, null);
         }
     };
 
@@ -184,6 +194,11 @@ final class AchicarVideo {
                     // eventos: una excepción que se escape acá adentro tira la app.
                     @Override
                     public void onCompleted(Composition composicion, ExportResult resultado) {
+                        if (contestado) {
+                            // Terminó después del tope: ya se entregó el original.
+                            borrar(salida);
+                            return;
+                        }
                         try {
                             terminar(Uri.fromFile(salida), null);
                         } catch (Throwable t) {
@@ -196,6 +211,10 @@ final class AchicarVideo {
                                         ExportException error) {
                         // Sin `cancel()`: Transformer ya terminó por su cuenta.
                         Log.w(TAG, "Transformer no pudo, va el original", error);
+                        if (contestado) {
+                            borrar(salida);
+                            return;
+                        }
                         terminar(origen, null);
                     }
                 })
@@ -255,7 +274,18 @@ final class AchicarVideo {
         return new File(carpeta, "cadeteria_" + System.currentTimeMillis() + ".mp4");
     }
 
-    /** Una excepción nuestra: si Transformer quedó andando, se lo para. */
+    private static void borrar(File salida) {
+        if (salida.exists() && !salida.delete()) {
+            Log.w(TAG, "no se pudo borrar " + salida.getName());
+        }
+    }
+
+    /**
+     * Una excepción nuestra: si Transformer quedó andando, se lo para. El
+     * {@code cancel()} acá no traba: llega desde {@code seguir}, con el hilo de
+     * Transformer recién arrancado y vivo, o desde {@code onCompleted}, cuando
+     * Transformer ya se soltó (vuelve enseguida). El tope no pasa por acá.
+     */
     private void fallo(Throwable t) {
         Log.w(TAG, "no se pudo achicar el video, va el original", t);
         if (transformer != null && !contestado) {

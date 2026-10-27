@@ -18,6 +18,7 @@ import android.provider.Settings;
 import android.util.TypedValue;
 import android.view.View;
 import android.os.PowerManager;
+import android.os.SystemClock;
 import android.webkit.CookieManager;
 import android.webkit.PermissionRequest;
 import android.webkit.ValueCallback;
@@ -82,6 +83,20 @@ public class MainActivity extends Activity {
      */
     private Uri fotoSacada;
     private static final String SACADA = "cadeteria.fotoSacada";
+
+    /**
+     * Cuánto después de contestar un selector de archivos no se busca versión
+     * nueva al volver al frente. Volver de la cámara o de la galería es un
+     * `onResume`, y el cartel de actualizar no se puede cerrar: instalar
+     * reemplaza la app y el cadete pierde lo que estaba cargando en el cierre.
+     * 5 minutos alcanzan para que suba el video (unos 16 MB por datos) y
+     * apriete Guardar, y cada foto o video los vuelve a contar. Es un tope
+     * corto a propósito: pasado, el chequeo vuelve solo y la actualización
+     * sigue siendo obligatoria (al abrir la app se chequea siempre).
+     */
+    private static final long SIN_ACTUALIZAR_MS = 5 * 60 * 1000L;
+    /** {@code elapsedRealtime()} de la última respuesta a un selector; 0 = ninguna. */
+    private long archivoContestadoEn;
 
     /**
      * Con qué URL abrir, en vez del día. La pone la notificación de una
@@ -311,8 +326,11 @@ public class MainActivity extends Activity {
         // Volver al frente también chequea: una app que quedó abierta de fondo
         // no se enteraría nunca de que hay versión nueva, y la actualización es
         // obligatoria. `Actualizaciones` trae su propio freno para no gastar la
-        // cuota de la API de GitHub.
-        Actualizaciones.chequearSiCorresponde(this);
+        // cuota de la API de GitHub. Salvo a mitad de cargar fotos o video
+        // (ver SIN_ACTUALIZAR_MS).
+        if (!cargandoArchivos()) {
+            Actualizaciones.chequearSiCorresponde(this);
+        }
         marcarChatEnPantalla(web.getUrl());
         // Y se vuelve a intentar arrancar la escucha de avisos: Android pudo
         // matar el servicio por memoria, o negarse a arrancarlo la primera vez
@@ -477,7 +495,8 @@ public class MainActivity extends Activity {
      * almacenamiento. Si la cámara guardara donde siempre y devolviera su Uri,
      * leerla dependería de que nos preste el permiso; si no lo presta, fallan
      * el achicado y la subida, sin aviso. En 8 y 9 (sin `RELATIVE_PATH`) queda
-     * lo que devuelva la cámara. El video grabado queda en la galería.
+     * lo que devuelva la cámara. Ya achicado, la grabación se borra (ver
+     * `achicar`).
      */
     private void elegirVideo(boolean hayCamara) {
         Intent abrir;
@@ -562,7 +581,15 @@ public class MainActivity extends Activity {
         }
     }
 
+    /** Hay un selector de archivos abierto, o se contestó hace menos de {@link #SIN_ACTUALIZAR_MS}. */
+    private boolean cargandoArchivos() {
+        return fotoPendiente != null
+                || (archivoContestadoEn != 0
+                        && SystemClock.elapsedRealtime() - archivoContestadoEn < SIN_ACTUALIZAR_MS);
+    }
+
     private void contestarFoto(Uri[] fotos) {
+        archivoContestadoEn = SystemClock.elapsedRealtime();
         if (fotos == null && fotoSacada != null) {
             // Se canceló: no dejar una foto vacía en la galería.
             try {
@@ -592,8 +619,9 @@ public class MainActivity extends Activity {
                     video = devueltas != null ? devueltas[0] : null;
                 }
             }
-            if (video != null && video.equals(fotoSacada)) {
-                // Es el video grabado: queda en la galería, no se borra.
+            boolean grabado = video != null && video.equals(fotoSacada);
+            if (grabado) {
+                // Es el video grabado: no se borra acá (ver `achicar`).
                 fotoSacada = null;
             }
             if (video == null || fotoPendiente == null) {
@@ -610,7 +638,7 @@ public class MainActivity extends Activity {
                 } catch (RuntimeException ignorado) { }
                 fotoSacada = null;
             }
-            achicar(video);
+            achicar(video, grabado);
             return;
         }
         if (codigo != ELIJO_FOTO) {
@@ -679,13 +707,25 @@ public class MainActivity extends Activity {
      * pudiera cargar en algún teléfono, el error salta ACÁ, al cargar la clase,
      * antes de entrar al método que ya se cuida solo. Entonces va el original,
      * y la página decide por su tope de 28 MB.
+     *
+     * <p>{@code grabado}: el video es lo que grabó "Grabar con la cámara", en
+     * la galería pública ({@code Movies/Cadeteria}). Ahí lo ve cualquier app,
+     * y es adentro de la casa del cliente, con audio (ley 18.331), a unos
+     * 100 MB por minuto. Si se achicó, la página sube la copia del caché
+     * privado de la app y la grabación se borra. Si va el original, queda: es
+     * lo que la página tiene que subir.
      */
-    private void achicar(final Uri video) {
+    private void achicar(final Uri video, final boolean grabado) {
         try {
             AchicarVideo.achicar(this, video, new AchicarVideo.Listo() {
                 @Override
                 public void entregar(Uri listo) {
                     contestarFoto(new Uri[]{listo});
+                    if (grabado && !video.equals(listo)) {
+                        try {
+                            getContentResolver().delete(video, null, null);
+                        } catch (RuntimeException ignorado) { }
+                    }
                 }
 
                 @Override

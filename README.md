@@ -76,8 +76,9 @@ visita.
   - **Video**: con `capture`, la cámara con tope de 60 segundos
     (`EXTRA_DURATION_LIMIT`), grabando en un archivo propio de la app
     (`Movies/Cadeteria`, como la foto en `Pictures/Cadeteria`) para leerlo sin
-    depender de que la cámara preste el suyo; sin `capture`, los videos del
-    teléfono. Si dura más de 62 s se avisa y no se entrega nada. Si no,
+    depender de que la cámara preste el suyo. Ya achicado, esa grabación se
+    borra: es adentro de la casa del cliente y la galería la ve cualquier app.
+    Sin `capture`, los videos del teléfono. Si dura más de 62 s se avisa y no se entrega nada. Si no,
     **`AchicarVideo` lo achica antes de dárselo a la página**: 720 p de lado
     corto, H.264 a 2 Mb/s y audio AAC (un minuto queda en unos 16 MB), con un
     cartel "Preparando el video… NN %". Usa Media3 Transformer.
@@ -87,6 +88,10 @@ visita.
     lo frena si pasa de 28 MB). Por lo mismo el manifiesto saca el
     `appComponentFactory` que trae androidx.core: el arranque de la app es el
     mismo que sin Media3.
+  - Volver de la cámara o la galería no busca versión nueva: con un selector
+    abierto o contestado hace menos de 5 minutos, `onResume` no llama a
+    `Actualizaciones`, para que el cartel obligatorio no corte un cierre a la
+    mitad. Pasado eso (y siempre al abrir la app) se chequea como siempre.
 
 No hay ninguna credencial dentro del APK: la autenticación es la cookie de
 sesión del propio WebView. Eso es lo que permite que este repo sea público.
