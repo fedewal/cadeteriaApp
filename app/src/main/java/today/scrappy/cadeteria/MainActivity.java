@@ -2,8 +2,10 @@ package today.scrappy.cadeteria;
 
 import android.Manifest;
 import android.app.Activity;
+import android.app.AlertDialog;
 import android.app.NotificationManager;
 import android.content.ActivityNotFoundException;
+import android.content.ClipData;
 import android.content.ContentValues;
 import android.content.Intent;
 import android.content.pm.PackageManager;
@@ -27,6 +29,7 @@ import android.widget.LinearLayout;
 import android.widget.TextView;
 
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
 
 /**
@@ -59,14 +62,17 @@ public class MainActivity extends Activity {
     private static final int PIDO_SEGUNDO_PLANO = 4;
     private static final int PIDO_CAMARA_FOTO = 5;
     private static final int ELIJO_FOTO = 6;
+    private static final int ELIJO_VIDEO = 7;
 
     /**
-     * El `<input type="file">` que espera una foto. Sin `onShowFileChooser` el
-     * WebView no hace NADA al tocarlo (reportado 2026-10-05: "me pide foto
-     * pero no me deja cargarla").
+     * El `<input type="file">` que espera una foto o un video. Sin
+     * `onShowFileChooser` el WebView no hace NADA al tocarlo (reportado
+     * 2026-10-05: "me pide foto pero no me deja cargarla").
      */
     private ValueCallback<Uri[]> fotoPendiente;
     private WebChromeClient.FileChooserParams fotoParams;
+    /** El input pide video (`accept="video/*"`): se graba o se elige y se achica. */
+    private boolean esVideo;
     /** Dónde escribe la cámara la foto que se está sacando. */
     private Uri fotoSacada;
 
@@ -207,9 +213,10 @@ public class MainActivity extends Activity {
                 }
                 fotoPendiente = callback;
                 fotoParams = params;
+                esVideo = pideVideo(params);
                 if (checkSelfPermission(Manifest.permission.CAMERA)
                         == PackageManager.PERMISSION_GRANTED) {
-                    elegirFoto(true);
+                    elegir(true);
                 } else {
                     requestPermissions(new String[]{Manifest.permission.CAMERA},
                             PIDO_CAMARA_FOTO);
@@ -425,6 +432,54 @@ public class MainActivity extends Activity {
                 && nuestro.getScheme().equalsIgnoreCase(origen.getScheme());
     }
 
+    private void elegir(boolean hayCamara) {
+        if (esVideo) {
+            elegirVideo(hayCamara);
+        } else {
+            elegirFoto(hayCamara);
+        }
+    }
+
+    /** Si algún tipo de `accept` es de video ("video/*", "video/mp4"). */
+    private static boolean pideVideo(WebChromeClient.FileChooserParams params) {
+        String[] tipos = params != null ? params.getAcceptTypes() : null;
+        if (tipos != null) {
+            for (String tipo : tipos) {
+                if (tipo != null && tipo.trim().startsWith("video")) {
+                    return true;
+                }
+            }
+        }
+        return false;
+    }
+
+    /**
+     * Graba con la cámara (si la página pidió `capture`) o elige de los videos
+     * del teléfono. A diferencia de la foto no se le pasa `EXTRA_OUTPUT`: la
+     * cámara guarda el video donde siempre y lo devuelve en `getData()`, con
+     * permiso de lectura para nosotros (así lo hace la cámara de referencia de
+     * Android). El video grabado queda en la galería del teléfono.
+     */
+    private void elegirVideo(boolean hayCamara) {
+        Intent abrir;
+        if (hayCamara && fotoParams != null && fotoParams.isCaptureEnabled()) {
+            // El minuto que promete la página ("Hasta 1 minuto"). Si la
+            // cámara lo ignora, AchicarVideo rechaza lo que dure de más.
+            abrir = new Intent(MediaStore.ACTION_VIDEO_CAPTURE)
+                    .putExtra(MediaStore.EXTRA_DURATION_LIMIT, 60);
+        } else {
+            abrir = fotoParams != null ? fotoParams.createIntent()
+                    : new Intent(Intent.ACTION_GET_CONTENT).setType("video/*");
+        }
+        try {
+            startActivityForResult(abrir, ELIJO_VIDEO);
+        } catch (RuntimeException e) {
+            // Sin app que lo atienda, o la cámara negada (`SecurityException`):
+            // que el input no quede trabado.
+            contestarFoto(null);
+        }
+    }
+
     /**
      * Abre la cámara (si la página pidió `capture`) o un selector con la
      * cámara y la galería. La cámara escribe en MediaStore porque la app no
@@ -487,20 +542,30 @@ public class MainActivity extends Activity {
     @Override
     protected void onActivityResult(int codigo, int resultado, Intent datos) {
         super.onActivityResult(codigo, resultado, datos);
+        if (codigo == ELIJO_VIDEO) {
+            Uri[] video = resultado == RESULT_OK ? elegidas(datos) : null;
+            if (video == null) {
+                contestarFoto(null);
+            } else {
+                achicar(video[0]);
+            }
+            return;
+        }
         if (codigo != ELIJO_FOTO) {
             return;
         }
         Uri[] fotos = null;
         if (resultado == RESULT_OK) {
-            if (datos != null && datos.getData() != null) {
-                fotos = WebChromeClient.FileChooserParams.parseResult(resultado, datos);
-                if (fotoSacada != null) {
+            Uri[] elegidas = elegidas(datos);
+            if (elegidas != null) {
+                fotos = elegidas;
+                if (fotoSacada != null && !Arrays.asList(elegidas).contains(fotoSacada)) {
                     // Eligió de la galería: la foto vacía de la cámara sobra.
                     try {
                         getContentResolver().delete(fotoSacada, null, null);
                     } catch (RuntimeException ignorado) { }
-                    fotoSacada = null;
                 }
+                fotoSacada = null;
             } else if (fotoSacada != null) {
                 fotos = new Uri[]{fotoSacada};
                 fotoSacada = null;
@@ -509,13 +574,72 @@ public class MainActivity extends Activity {
         contestarFoto(fotos);
     }
 
+    /**
+     * Lo que devolvió el selector: TODAS las de `ClipData` si se eligieron
+     * varias, si no la de `getData()`. Hasta la 0.10 se leía sólo `getData()`,
+     * que con varias elegidas viene vacío: la página recibía la foto vacía de
+     * la cámara en vez de las fotos (por eso el servidor no le pone `multiple`
+     * a un APK viejo).
+     */
+    private static Uri[] elegidas(Intent datos) {
+        if (datos == null) {
+            return null;
+        }
+        ClipData clip = datos.getClipData();
+        if (clip != null) {
+            List<Uri> uris = new ArrayList<>();
+            for (int i = 0; i < clip.getItemCount(); i++) {
+                Uri uri = clip.getItemAt(i).getUri();
+                if (uri != null) {
+                    uris.add(uri);
+                }
+            }
+            if (!uris.isEmpty()) {
+                return uris.toArray(new Uri[0]);
+            }
+        }
+        return datos.getData() != null ? new Uri[]{datos.getData()} : null;
+    }
+
+    /**
+     * Achica el video antes de dárselo a la página (ver {@link AchicarVideo}).
+     *
+     * <p>El {@code catch} de {@code Throwable} no es exagerado: si Media3 no
+     * pudiera cargar en algún teléfono, el error salta ACÁ, al cargar la clase,
+     * antes de entrar al método que ya se cuida solo. Entonces va el original,
+     * y la página decide por su tope de 28 MB.
+     */
+    private void achicar(final Uri video) {
+        try {
+            AchicarVideo.achicar(this, video, new AchicarVideo.Listo() {
+                @Override
+                public void entregar(Uri listo) {
+                    contestarFoto(new Uri[]{listo});
+                }
+
+                @Override
+                public void rechazar(String mensaje) {
+                    contestarFoto(null);
+                    if (!isFinishing()) {
+                        new AlertDialog.Builder(MainActivity.this)
+                                .setMessage(mensaje)
+                                .setPositiveButton("Entendido", null)
+                                .show();
+                    }
+                }
+            });
+        } catch (Throwable t) {
+            contestarFoto(new Uri[]{video});
+        }
+    }
+
     @Override
     public void onRequestPermissionsResult(int codigo, String[] permisos,
                                            int[] resultados) {
         super.onRequestPermissionsResult(codigo, permisos, resultados);
         if (codigo == PIDO_CAMARA_FOTO) {
             // Sin cámara igual se puede elegir de la galería.
-            elegirFoto(resultados.length > 0
+            elegir(resultados.length > 0
                     && resultados[0] == PackageManager.PERMISSION_GRANTED);
             return;
         }

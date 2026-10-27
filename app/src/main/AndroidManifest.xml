@@ -1,5 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
-<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
 
     <uses-permission android:name="android.permission.INTERNET" />
     <!-- Para pedir quedar fuera de la optimización de batería: ver
@@ -57,7 +58,14 @@
     <uses-permission android:name="android.permission.ACCESS_BACKGROUND_LOCATION" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_LOCATION" />
 
+    <!-- `tools:remove`: Media3 (ver AchicarVideo) trae androidx.core, que se
+         pone como fabrica de TODOS los componentes de la app. Eso correria al
+         abrir, antes que cualquier linea nuestra, y la 0.11 sale obligatoria y
+         sin probar en un telefono: si algo ahi fallara, la app no abriria y el
+         actualizador nunca podria entregar el arreglo. Nada de la app la usa;
+         sin ella el arranque es el mismo de la 0.10. -->
     <application
+        tools:remove="android:appComponentFactory"
         android:allowBackup="false"
         android:icon="@mipmap/ic_launcher"
         android:label="@string/app_name"

@@ -66,6 +66,24 @@ visita.
   descarga ni instala sola: abre el APK y el instalador del sistema hace el
   resto. Falla en silencio, porque es un aviso y no algo de lo que dependa el
   trabajo del cadete.
+- **Fotos y video al cerrar un evento** (0.11.0) — la página tiene un
+  `<input type="file">` por caso y `MainActivity.onShowFileChooser` los
+  atiende:
+  - **Foto**: con `capture`, la cámara; sin `capture`, un selector con la
+    galería y la cámara. Si se eligen varias de la galería se devuelven
+    **todas** (`ClipData`); hasta la 0.10 llegaba la foto vacía de la cámara,
+    por eso el servidor no le pone `multiple` a un APK viejo.
+  - **Video**: con `capture`, la cámara con tope de 60 segundos
+    (`EXTRA_DURATION_LIMIT`); sin `capture`, los videos del teléfono. Si dura
+    más de 62 s se avisa y no se entrega nada. Si no, **`AchicarVideo` lo
+    achica antes de dárselo a la página**: 720 p de lado corto, H.264 a 2 Mb/s
+    y audio AAC (un minuto queda en unos 16 MB), con un cartel "Preparando el
+    video… NN %". Usa Media3 Transformer.
+  - Achicar no puede tirar la app: todo Media3 vive en `AchicarVideo`, que se
+    carga recién al elegir un video, y ante cualquier falla se entrega el video
+    original (la página lo frena si pasa de 28 MB). Por lo mismo el manifiesto
+    saca el `appComponentFactory` que trae androidx.core: el arranque de la app
+    es el mismo que sin Media3.
 
 No hay ninguna credencial dentro del APK: la autenticación es la cookie de
 sesión del propio WebView. Eso es lo que permite que este repo sea público.
@@ -83,10 +101,14 @@ JAVA_HOME="/c/Program Files/Android/Android Studio/jbr" ./gradlew assembleDebug
 las lee como escapes y el build muere en `java.io.IOException: Invalid file
 path`, que no dice nada del problema real.
 
-**Cero dependencias**, y es a propósito: con `minSdk 26` todo lo que usa la app
-está en la plataforma. En vendedoresApp se probó con `appcompat` y arrastraba la
-stdlib de Kotlin en dos versiones incompatibles (`Duplicate class kotlin.*`);
-sacarla resolvió eso de raíz y deja el APK en 13 KB.
+**Una sola dependencia, Media3**, y es a propósito: con `minSdk 26` todo lo
+demás que usa la app está en la plataforma. En vendedoresApp se probó con
+`appcompat` y arrastraba la stdlib de Kotlin en dos versiones incompatibles
+(`Duplicate class kotlin.*`); sacarla resolvió eso de raíz. Media3 entró en la
+0.11.0 para achicar el video en el teléfono (hacerlo a mano con `MediaCodec`
+son cientos de líneas frágiles) y lleva el APK de 34 KB a unos 3,3 MB. Si
+vuelve el `Duplicate class kotlin.*`, se alinea con
+`implementation platform('org.jetbrains.kotlin:kotlin-bom:1.9.24')`.
 
 Para firmar una release hace falta un `keystore.properties` en la raíz (no está
 en el repo):

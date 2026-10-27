@@ -25,8 +25,8 @@ android {
         // 26 deja lugar a un teléfono más viejo sin costarnos nada.
         minSdk 26
         targetSdk 34
-        versionCode 18
-        versionName "0.10.0"
+        versionCode 19
+        versionName "0.11.0"
         buildConfigField "String", "BASE_URL", '"https://back.scrappy.today"'
     }
 
@@ -63,8 +63,18 @@ android {
 }
 
 dependencies {
-    // NINGUNA, igual que vendedoresApp y por el mismo motivo: `appcompat`
+    // Ninguna más, igual que vendedoresApp y por el mismo motivo: `appcompat`
     // arrastraba la stdlib de Kotlin en dos versiones incompatibles
     // (`Duplicate class kotlin.*`). Con `minSdk 26` todo lo que usa la app
     // existe en la plataforma.
+    //
+    // La única excepción es Media3, para achicar el video en el teléfono antes
+    // de subirlo (ver AchicarVideo). Hacerlo a mano con `MediaCodec` son
+    // cientos de líneas frágiles -- decodificar, escalar, codificar, mezclar
+    // el audio, girar los videos verticales -- y cada fabricante tiene sus
+    // mañas. Si vuelve el `Duplicate class kotlin.*`, se alinea con
+    // `implementation platform('org.jetbrains.kotlin:kotlin-bom:1.9.24')`.
+    implementation 'androidx.media3:media3-transformer:1.8.0'
+    implementation 'androidx.media3:media3-effect:1.8.0'
+    implementation 'androidx.media3:media3-common:1.8.0'
 }
