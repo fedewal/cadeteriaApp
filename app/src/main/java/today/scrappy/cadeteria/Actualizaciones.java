@@ -18,6 +18,7 @@ import org.json.JSONObject;
 
 import java.io.BufferedReader;
 import java.io.InputStreamReader;
+import java.lang.ref.WeakReference;
 import java.net.HttpURLConnection;
 import java.net.URL;
 import java.nio.charset.StandardCharsets;
@@ -69,13 +70,21 @@ final class Actualizaciones {
     private static final long ESPERA_MS = 15 * 60 * 1000L;
 
     /**
-     * Ya hay un cartel puesto.
+     * La pantalla que tiene el cartel puesto.
      *
      * <p>El cartel no se cierra nunca, así que sin esta guarda cada vuelta al
      * frente apilaría otro encima: el cadete tendría que cerrar N carteles que
      * no se pueden cerrar.
+     *
+     * <p>Es LA PANTALLA y no un "ya lo mostré" de todo el proceso. Hasta la
+     * 0.11.0 era un {@code boolean} que no se apagaba nunca: si Android rearmaba
+     * la pantalla (modo oscuro, tamaño de letra, sacar la app de recientes) con
+     * el proceso vivo, el cartel se iba con la pantalla vieja y no volvía hasta
+     * reiniciar el teléfono. Los servicios de ubicación y avisos mantienen vivo
+     * el proceso días: así un teléfono siguió 5 días en la 0.9.0 (2026-10-23 a
+     * 28). Débil para no retener una pantalla que Android ya tiró.
      */
-    private static boolean mostrando = false;
+    private static WeakReference<Activity> conCartel = new WeakReference<>(null);
 
     private static long ultimoChequeo = 0L;
 
@@ -95,7 +104,7 @@ final class Actualizaciones {
      */
     static void chequearSiCorresponde(final Activity actividad) {
         long ahora = System.currentTimeMillis();
-        if (mostrando || ahora - ultimoChequeo < ESPERA_MS) {
+        if (conCartel.get() == actividad || ahora - ultimoChequeo < ESPERA_MS) {
             return;
         }
         chequear(actividad);
@@ -123,10 +132,15 @@ final class Actualizaciones {
                     actividad.runOnUiThread(new Runnable() {
                         @Override
                         public void run() {
-                            if (actividad.isFinishing() || mostrando) {
+                            // `isDestroyed`: si Android rearmó la pantalla
+                            // mientras se le preguntaba a GitHub, ésta ya no está
+                            // y mostrarle un diálogo tira la app. La nueva hace su
+                            // propio chequeo al crearse.
+                            if (actividad.isFinishing() || actividad.isDestroyed()
+                                    || conCartel.get() == actividad) {
                                 return;
                             }
-                            mostrando = true;
+                            conCartel = new WeakReference<>(actividad);
                             ofrecer(actividad, version, apk);
                         }
                     });

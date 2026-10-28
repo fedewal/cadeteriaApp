@@ -62,10 +62,14 @@ visita.
   repetidos. Es un servicio **aparte** de `AvisosService` (`dataSync`), con su
   propio canal de notificación: sin permiso de ubicación los avisos siguen
   andando. `ArranqueReceiver` levanta los dos al reiniciar el teléfono.
-- **`Actualizaciones`** — pregunta a la API de Releases de GitHub al abrir. No
-  descarga ni instala sola: abre el APK y el instalador del sistema hace el
-  resto. Falla en silencio, porque es un aviso y no algo de lo que dependa el
-  trabajo del cadete.
+- **`Actualizaciones`** — pregunta a la API de Releases de GitHub al abrir y al
+  volver al frente (cada 15 minutos como mucho). Es obligatoria: el cartel no
+  se cierra, la app baja el APK (`DownloadManager`) y el instalador del sistema
+  hace el resto. Falla en silencio: sin señal o con GitHub caído no encierra al
+  cadete. El cartel se recuerda por pantalla y no por proceso: hasta la 0.11.0,
+  si Android rearmaba la pantalla, el cartel no volvía hasta reiniciar el
+  teléfono. Por eso el servidor frena por su lado las pantallas a un APK
+  anterior a `CADETERIA_APK_MINIMA` (back, `cadeteria/middleware.py`).
 - **Fotos y video al cerrar un evento** (0.11.0) — la página tiene un
   `<input type="file">` por caso y `MainActivity.onShowFileChooser` los
   atiende:
