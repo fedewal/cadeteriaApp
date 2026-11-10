@@ -83,8 +83,9 @@ visita.
     depender de que la cámara preste el suyo. Ya achicado, esa grabación se
     borra: es adentro de la casa del cliente y la galería la ve cualquier app.
     Sin `capture`, los videos del teléfono. Si dura más de 62 s se avisa y no se entrega nada. Si no,
-    **`AchicarVideo` lo achica antes de dárselo a la página**: 720 p de lado
-    corto, H.264 a 2 Mb/s y audio AAC (un minuto queda en unos 16 MB), con un
+    **`AchicarVideo` lo achica antes de dárselo a la página**: 480 p de lado
+    corto, H.264 a 1 Mb/s y sin audio (desde la 0.11.2; un minuto queda en unos
+    7,5 MB), con un
     cartel "Preparando el video… NN %". Usa Media3 Transformer.
   - Achicar no puede tirar la app ni dejarla trabada: todo Media3 vive en
     `AchicarVideo`, que se carga recién al elegir un video, y ante cualquier

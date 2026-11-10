@@ -33,8 +33,11 @@ import java.util.Locale;
  *
  * <p>Un minuto filmado con la cámara del teléfono ronda los 100 MB: no pasa el
  * tope de 30 MB por pedido de nginx, y subirlo entero por datos móviles es
- * justo lo que no queremos. A 720 p de lado corto y 2 Mb/s, un minuto queda
- * en unos 15 MB más el audio, debajo de los 20 MB que pide el diseño.
+ * justo lo que no queremos. A 480 p de lado corto, 1 Mb/s y SIN audio, un
+ * minuto queda en unos 7,5 MB (v0.11.2, pedido de Federico 2026-11-10: con
+ * poca señal adentro de una casa la subida tardaba minutos; sin audio además
+ * no se graban voces en la casa del cliente, y la página avisa que va sin
+ * sonido). Si el achicado falla se entrega el original, que sí lleva audio.
  *
  * <p>El cartel no tiene "Cancelar", así que nada puede dejar al cadete
  * encerrado: la exportación la corta Transformer si en 10 s no escribe nada,
@@ -73,8 +76,8 @@ final class AchicarVideo {
      * cortó.
      */
     private static final long MAXIMO_MS = 62_000;
-    private static final int LADO_CORTO = 720;
-    private static final int BITRATE = 2_000_000;
+    private static final int LADO_CORTO = 480;
+    private static final int BITRATE = 1_000_000;
     private static final long CADA_MS = 500;
     /** Un minuto de video se achica en bastante menos; esto es solo la salida de emergencia. */
     private static final long TIEMPO_MAXIMO_MS = 120_000;
@@ -183,7 +186,6 @@ final class AchicarVideo {
         final File salida = archivoDeSalida();
         transformer = new Transformer.Builder(actividad)
                 .setVideoMimeType(MimeTypes.VIDEO_H264)
-                .setAudioMimeType(MimeTypes.AUDIO_AAC)
                 .setEncoderFactory(new DefaultEncoderFactory.Builder(actividad)
                         .setRequestedVideoEncoderSettings(new VideoEncoderSettings.Builder()
                                 .setBitrate(BITRATE)
@@ -220,6 +222,7 @@ final class AchicarVideo {
                 })
                 .build();
         EditedMediaItem video = new EditedMediaItem.Builder(MediaItem.fromUri(origen))
+                .setRemoveAudio(true)
                 .setEffects(new Effects(Collections.emptyList(),
                         Collections.singletonList(Presentation.createForShortSide(LADO_CORTO))))
                 .build();
